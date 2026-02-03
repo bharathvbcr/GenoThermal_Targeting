@@ -43,7 +43,7 @@ The workflow consists of 9 distinct phases:
 1. Clone the repository:
 
     ```bash
-    git clone <repository-url>
+    git clone https://github.com/bharathvbcr/GenoThermal_Targeting.git
     cd Geno-Thermal_Targeting
     ```
 
