@@ -1,0 +1,14 @@
+{
+  "gene_id": "EGFR",
+  "predictions": {
+    "normal_score": 12.5,
+    "mutated_score": 85.0,
+    "classification": "SUPER_ENHANCER",
+    "confidence": 0.98,
+    "epigenetic_profile": {
+      "H3K27ac": "High",
+      "H3K4me1": "High",
+      "H3K27me3": "Low"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+requests
+pandas
+matplotlib
+ipywidgets
+numpy
+jupyter
+py3Dmol
+biopython
+seaborn
+alphagenome
+gymnasium
+stable-baselines3
+logomaker

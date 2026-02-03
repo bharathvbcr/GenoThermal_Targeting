@@ -1,0 +1,33 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# System
+.DS_Store
+nul
+
+# Logs
+*.log
+ppo_gene_tensorboard/
+
+# Data & Outputs (Large files)
+alphafold_jobs/
+alphafold_results/
+predicted_structures/
+simulated_pdbs/
+sample_data/
+
+# IDE/Editor
+.vscode/
+.idea/
+.claude/
+.antigravity/
