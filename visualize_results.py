@@ -3,13 +3,25 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import sys
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("visualize_results.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("Visualizer")
 
 def plot_evolution_log(log_file="evolution_log.csv"):
     if not os.path.exists(log_file):
-        print(f"Error: {log_file} not found. Run 'python hard_mode/evolver.py' first.")
+        logger.error(f"{log_file} not found. Run 'python hard_mode/evolver.py' first.")
         return
 
-    print(f"Plotting {log_file}...")
+    logger.info(f"Plotting {log_file}...")
     df = pd.read_csv(log_file)
     
     # Setup style
@@ -62,7 +74,7 @@ def plot_evolution_log(log_file="evolution_log.csv"):
     
     output_file = "evolution_trajectory.png"
     plt.savefig(output_file, dpi=300)
-    print(f"Plot saved to {output_file}")
+    logger.info(f"Plot saved to {output_file}")
     plt.close()
 
 if __name__ == "__main__":
