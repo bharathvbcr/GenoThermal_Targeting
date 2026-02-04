@@ -1,0 +1,11 @@
+structure_path,plddt_score,pae_score,model_index,job_name
+predicted_structures\fold_dock_ge11_egf_mimic_model_0.cif,90.0,0.53,0,dock_GE11_EGF_Mimic
+predicted_structures\fold_dock_novel_peptide_a_model_0.cif,89.0,0.46,0,dock_Novel_Peptide_A
+predicted_structures\fold_dock_novel_peptide_b_model_0.cif,91.0,0.73,0,dock_Novel_Peptide_B
+predicted_structures\fold_dock_poly_alanine_neg_control_model_0.cif,85.0,0.56,0,dock_Poly_Alanine_Neg_Control
+predicted_structures\fold_dock_rgd_integrin_binder_model_0.cif,90.0,0.69,0,dock_RGD_Integrin_binder
+predicted_structures\fold_dock_ge11_egf_mimic_model_0.cif,90.0,0.53,0,dock_GE11_EGF_Mimic
+predicted_structures\fold_dock_novel_peptide_a_model_0.cif,89.0,0.46,0,dock_Novel_Peptide_A
+predicted_structures\fold_dock_novel_peptide_b_model_0.cif,91.0,0.73,0,dock_Novel_Peptide_B
+predicted_structures\fold_dock_poly_alanine_neg_control_model_0.cif,85.0,0.56,0,dock_Poly_Alanine_Neg_Control
+predicted_structures\fold_dock_rgd_integrin_binder_model_0.cif,90.0,0.69,0,dock_RGD_Integrin_binder

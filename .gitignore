@@ -20,8 +20,6 @@ nul
 ppo_gene_tensorboard/
 
 # Data & Outputs (Large files)
-alphafold_jobs/
-alphafold_results/
 predicted_structures/
 simulated_pdbs/
 sample_data/
@@ -30,4 +28,13 @@ sample_data/
 .vscode/
 .idea/
 .claude/
+.gemini/
+.gemini_security/
 .antigravity/
+
+# Agent Workflow
+RESEARCH.md
+PLAN.md
+TODO.md
+ACT.md
+TEST.md
