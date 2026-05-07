@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/geno-thermal-logo.png" alt="Geno-Thermal Targeting 3D logo" width="860">
+  <img src="docs/assets/geno-thermal-logo.png" alt="Geno-Thermal Targeting 3D logo" width="400">
 </p>
 
 # Geno-Thermal Targeting
