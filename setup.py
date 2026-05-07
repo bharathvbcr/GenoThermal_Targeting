@@ -1,4 +1,10 @@
-from setuptools import setup, find_packages
+from pathlib import Path
+
+from setuptools import find_packages, setup
+
+
+ROOT = Path(__file__).parent
+README = ROOT / "README.md"
 
 setup(
     name="geno_thermal_targeting",
@@ -21,4 +27,6 @@ setup(
         "ligand_designer.py"
     ],
     description="Toolbox for Geno-Thermal Targeting nanoparticle design",
+    long_description=README.read_text(encoding="utf-8") if README.exists() else "",
+    long_description_content_type="text/markdown",
 )

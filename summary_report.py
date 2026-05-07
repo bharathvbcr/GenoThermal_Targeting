@@ -2,8 +2,11 @@ import pandas as pd
 import os
 import json
 
+LOGO_PATH = os.path.join("docs", "assets", "geno-thermal-logo.png")
+
 def main():
     print("--- Geno-Thermal Targeting: Project Summary ---\n")
+    print(f"3D logo asset: {LOGO_PATH}\n")
 
     # 1. Check Target Report
     if os.path.exists("target_report.json"):
@@ -22,11 +25,15 @@ def main():
         # Best Candidate
         if 'plddt_score' in df.columns:
             best = df.loc[df['plddt_score'].idxmax()]
-            print(f"Best Candidate: {best['name']}")
-            print(f"  Sequence: {best['seq']}")
+            candidate_name = best.get("name") or best.get("job_name") or best.get("structure_path", "unknown")
+            print(f"Best Candidate: {candidate_name}")
+            if "seq" in best:
+                print(f"  Sequence: {best['seq']}")
             print(f"  pLDDT Score: {best['plddt_score']:.2f}")
-            print(f"  Binding Energy: {best['binding_energy_kcal_mol']} kcal/mol")
-            print(f"  Model File: {best['structure_path']}")
+            if "binding_energy_kcal_mol" in best:
+                print(f"  Binding Energy: {best['binding_energy_kcal_mol']} kcal/mol")
+            if "structure_path" in best:
+                print(f"  Model File: {best['structure_path']}")
             
             if best['plddt_score'] > 80:
                 print("\nSUCCESS: Identified High-Confidence Binder!")

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../docs/assets/geno-thermal-logo.png" alt="Geno-Thermal Targeting 3D logo" width="760">
+</p>
+
 # Hard Mode Research Stack
 
 `hard_mode/` contains the inverse-design and verification modules used by the
