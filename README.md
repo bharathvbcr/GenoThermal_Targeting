@@ -1,7 +1,7 @@
 # Geno-Thermal Targeting
 
 <p align="center">
-  <img src="docs/assets/geno-thermal-logo.png" alt="Geno-Thermal Targeting 3D logo" width="400">
+  <img src="docs/assets/geno-thermal-logo.png" alt="Geno-Thermal Targeting 3D logo" width="300">
 </p>
 
 
