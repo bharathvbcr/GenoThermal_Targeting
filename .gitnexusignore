@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated experiment/runtime outputs
+alphafold_jobs/
+alphafold_results/
+predicted_structures/
+simulated_pdbs/
+ppo_gene_tensorboard/
+geno_thermal_targeting.egg-info/
+
+# Large notebooks and generated artifacts
+*.ipynb
+*.zip
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.log
+*.csv
+*.json
+nul
