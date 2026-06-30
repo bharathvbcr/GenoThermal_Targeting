@@ -15,6 +15,11 @@ the whole pipeline in plain language. Every tool wraps EXISTING project code:
     screen_and_verify      -> chains discover_target -> design_ligands ->
                                (design_promoter_flash) -> verify_with_bionemo into one
                                call; the headline demo artifact
+    autonomous_design_loop -> closes the loop screen_and_verify leaves open: iterates
+                               design (project Boltz-2/Flash fold) -> independent verify
+                               (BioNeMo) -> mutate survivors, until enough binders are
+                               independently validated. Optimizes on one model, validates
+                               on a DIFFERENT one, so the search can't overfit its scorer.
     kill_flash_endpoints   -> `flash undeploy --all --force` (gated by confirm=True),
                                the destructive half of the reliability demo
 
@@ -884,6 +889,289 @@ async def screen_and_verify(
 
 
 # --------------------------------------------------------------------------- #
+# Closed-loop autonomous design — the iterative half screen_and_verify lacks
+# --------------------------------------------------------------------------- #
+_AA_ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
+
+
+def _safe_name(name: str) -> str:
+    """Canonical job name: lowercased, spaces -> underscores. Used so a candidate's
+    name, the input-CSV name, boltz_designer's emitted job_name, and the committed-library
+    key all collapse to one key the loop can match across without casing/space drift."""
+    return (name or "").strip().lower().replace(" ", "_")
+
+
+def _mutate_peptide(seq: str, n_mut: int, rng: Any) -> str:
+    """Apply up to `n_mut` random point substitutions to a peptide (length-preserving).
+    Substitutions only — the fold oracle scores a fixed-length complex, and indels would
+    confound the round-over-round plddt comparison the loop selects on."""
+    chars = list(seq)
+    if not chars:
+        return seq
+    for p in rng.sample(range(len(chars)), min(n_mut, len(chars))):
+        chars[p] = rng.choice([a for a in _AA_ALPHABET if a != chars[p]])
+    return "".join(chars)
+
+
+def _read_known_plddt() -> dict[str, float]:
+    """Map canonical job name -> the project's own fold plddt from the committed libraries.
+    Lets the loop's SEED binders carry a real prior-fold score even when no fresh fold runs
+    this session (cold Flash endpoint / no local boltz), so round 1 is always scorable;
+    newly mutated variants are NOT in here and require a live fold (honestly flagged if none)."""
+    known: dict[str, float] = {}
+    for path in ("outputs/reports/candidate_library_v2.csv", "outputs/reports/candidate_library.csv"):
+        for row in _read_csv_records(path):
+            job = _safe_name(str(row.get("job_name", "")))
+            val = row.get("plddt_score")
+            if job and val not in (None, ""):
+                try:
+                    known[job] = float(val)
+                except (TypeError, ValueError):
+                    pass
+    return known
+
+
+def _loop_reasoning(scored: list[dict[str, Any]], cumulative_validated: int, target_validated: int) -> str:
+    """One-line, human-readable rationale for what the loop saw this round and why it
+    continues or stops — the per-round 'thinking' the trace exposes to the client."""
+    if not scored:
+        return "No candidates scored this round (fold oracle produced nothing); nothing to evolve."
+    best = scored[0]
+    n_val = sum(1 for s in scored if s["validated"])
+    n_div = sum(1 for s in scored if s["verdict"] == "DIVERGENT_FLAG_FOR_REVIEW")
+    n_rej = sum(1 for s in scored if s["verdict"] == "REJECTED_LOW_COMPLEXITY")
+    tail = (
+        f"target of {target_validated} independently-validated binder(s) met — stopping."
+        if cumulative_validated >= target_validated
+        else f"{target_validated - cumulative_validated} more needed; mutating top survivors into the next round."
+    )
+    return (
+        f"{n_val} corroborated, {n_div} divergent, {n_rej} rejected-low-complexity. "
+        f"best={best['name']} (project={best['project_plddt']}, bionemo={best['bionemo_confidence']}, "
+        f"{best['verdict']}). {tail}"
+    )
+
+
+@mcp.tool()
+async def autonomous_design_loop(
+    target_gene: str = "EGFR",
+    seed_candidates_file: str = "data/sample_data/candidates.csv",
+    target_seq: str | None = None,
+    max_rounds: int = 3,
+    variants_per_round: int = 4,
+    target_validated: int = 2,
+    mutations_per_variant: int = 2,
+    use_flash: bool = True,
+    enforce_gate: bool = True,
+    rng_seed: int = 1234,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Autonomously evolve binders until enough are INDEPENDENTLY validated (closed loop).
+
+    The capability the one-shot ``screen_and_verify`` is missing. Each round it
+      1. folds/docks the current binders against the target with the project's own
+         Boltz-2 / RunPod-Flash path  — the SEARCH oracle (drives selection & mutation);
+      2. independently re-folds every binder on NVIDIA BioNeMo — the ACCEPTANCE oracle;
+      3. keeps only binders the *independent* verifier CORROBORATES;
+      4. breeds the best non-rejected survivors into the next round's point-mutants.
+    It stops when ``target_validated`` distinct binders are dual-validated or ``max_rounds``
+    is reached, returning the validated library plus a per-round reasoning trace.
+
+    Why this is more than a wrapper: the search oracle and the acceptance oracle are
+    DELIBERATELY DIFFERENT MODELS. The loop optimizes on the project's own fold, but a
+    binder is only ever marked ``validated`` by the independent BioNeMo verifier — so a
+    directed search cannot overfit to its own scorer. That is the project's
+    adversarial-verification rule turned into an optimization criterion. Folding each round
+    fans out on the Flash fleet, so the loop is also a repeated 0->N->0 GPU autoscale.
+
+    Honesty contract (consistent with the rest of this server): the search signal is a real
+    fold. Seed binders fall back to their committed-library fold scores so round 1 always
+    has signal, but newly mutated variants need a *live* fold — if none is produced (no
+    local boltz/torch AND the Flash fold endpoint is cold), the loop reports
+    ``fold_oracle_available: false`` for that round and STOPS rather than evolving on
+    invented fitness. Per-round ``data_freshness`` / ``flash_mode`` say which actually ran.
+
+    Args:
+        target_gene: Gene scored at the discovery gate before any design.
+        seed_candidates_file: CSV with 'name','seq' columns of starting peptide binders.
+        target_seq: Receptor sequence; defaults to the EGFR ectodomain.
+        max_rounds: Hard cap on design rounds.
+        variants_per_round: New mutated binders proposed each round.
+        target_validated: Stop once this many DISTINCT binders are independently corroborated.
+        mutations_per_variant: Point substitutions applied per child binder.
+        use_flash: Fan each round's fold out on the RunPod Flash GPU fleet (default True).
+        enforce_gate: Block before any design when the locus is not SUPER_ENHANCER.
+        rng_seed: Seed for the mutation RNG (reproducible runs).
+    """
+    import csv as _csv
+    import random as _random
+    import shutil
+    import tempfile
+
+    rng = _random.Random(rng_seed)
+    tgt = target_seq or DEFAULT_TARGET
+    report: dict[str, Any] = {"ok": True, "target_gene": target_gene, "tool": "autonomous_design_loop"}
+
+    # Discovery gate — same contract as screen_and_verify: a failed gate stops the loop
+    # before any design, so the report can never claim validated binders past a failed gate.
+    disc = discover_target(target_gene=target_gene)
+    cls = (disc.get("predictions") or {}).get("classification")
+    report["discovery"] = {"classification": cls, "mode": disc.get("mode"), "ok": disc.get("ok")}
+    report["discovery_gate_passed"] = cls == "SUPER_ENHANCER"
+    if enforce_gate and not report["discovery_gate_passed"]:
+        report["status"] = "BLOCKED_AT_DISCOVERY_GATE"
+        report["validated_library"] = []
+        report["validated_count"] = 0
+        report["rounds"] = []
+        report["summary"] = (
+            f"target {target_gene}: discovery gate FAILED (classification={cls!r}); "
+            f"no design attempted. Pass enforce_gate=False to override."
+        )
+        return report
+
+    # Seed population — drop low-complexity seeds up front (the verifier rejects them
+    # anyway, and each one wastes a fold slot).
+    seeds: list[dict[str, Any]] = []
+    for r in _read_csv_records(seed_candidates_file):
+        seq = (r.get("seq") or "").strip()
+        if not seq or _sequence_complexity(seq)["is_low_complexity"]:
+            continue
+        seeds.append({"name": _safe_name(r.get("name") or f"seed_{len(seeds)}"), "seq": seq, "origin": "seed"})
+    if not seeds:
+        return {"ok": False, "tool": "autonomous_design_loop",
+                "error": f"No usable (non-low-complexity) seed binders in {seed_candidates_file}."}
+
+    known_plddt = _read_known_plddt()
+    population = seeds
+    hall_of_fame: dict[str, dict[str, Any]] = {}   # seq -> best validated record
+    seen_seqs: set[str] = {s["seq"] for s in seeds}
+    rounds_trace: list[dict[str, Any]] = []
+    tmpdir = tempfile.mkdtemp(prefix="autoloop_")
+
+    try:
+        for rnd in range(1, max_rounds + 1):
+            if ctx is not None:
+                try:
+                    await ctx.report_progress(rnd, max_rounds,
+                                              f"design round {rnd}/{max_rounds}: folding {len(population)} binders")
+                except Exception:
+                    pass
+
+            in_csv = os.path.join(tmpdir, f"round{rnd}_in.csv")
+            out_csv = os.path.join(tmpdir, f"round{rnd}_out.csv")
+            with open(in_csv, "w", newline="") as f:
+                w = _csv.DictWriter(f, fieldnames=["name", "seq"])
+                w.writeheader()
+                for c in population:
+                    w.writerow({"name": c["name"], "seq": c["seq"]})
+
+            # SEARCH oracle: the project's own fold (Flash-fanned when use_flash).
+            design = await design_ligands(
+                candidates_file=in_csv, target_seq=tgt, output_csv=out_csv,
+                use_flash=use_flash, ctx=ctx,
+            )
+            folded = {_safe_name(str(row.get("job_name", ""))): row for row in (design.get("candidates") or [])}
+
+            scored: list[dict[str, Any]] = []
+            fresh_fold_hits = 0
+            for c in population:
+                row = folded.get(c["name"])
+                plddt: float | None = None
+                plddt_source: str | None = None
+                if row and row.get("plddt_score") not in (None, ""):
+                    try:
+                        plddt = float(row["plddt_score"]); plddt_source = "fresh_fold"; fresh_fold_hits += 1
+                    except (TypeError, ValueError):
+                        pass
+                if plddt is None and c["name"] in known_plddt:
+                    plddt = known_plddt[c["name"]]; plddt_source = "committed_library"
+                # ACCEPTANCE oracle: independent BioNeMo re-fold (off-thread so a slow NIM
+                # call doesn't block the event loop / progress streaming).
+                v = await asyncio.to_thread(
+                    verify_with_bionemo, target_seq=tgt, binder_seq=c["seq"], project_plddt=plddt
+                )
+                validated = v.get("verdict") == "CORROBORATED"
+                rec = {
+                    "name": c["name"], "seq": c["seq"], "origin": c["origin"],
+                    "project_plddt": plddt, "plddt_source": plddt_source,
+                    "bionemo_confidence": v.get("bionemo_confidence"),
+                    "verdict": v.get("verdict"), "validated": validated,
+                }
+                scored.append(rec)
+                if validated and c["seq"] not in hall_of_fame:
+                    hall_of_fame[c["seq"]] = rec
+
+            fold_oracle_available = fresh_fold_hits > 0 or any(s["plddt_source"] for s in scored)
+            scored.sort(key=lambda x: (x["validated"], x["project_plddt"] or 0.0), reverse=True)
+            rounds_trace.append({
+                "round": rnd,
+                "population_size": len(population),
+                "fresh_folds": fresh_fold_hits,
+                "fold_oracle_available": fold_oracle_available,
+                "data_freshness": design.get("data_freshness"),
+                "flash_mode": "FLASH" if design.get("flash_autoscaling") else "local/none",
+                "validated_this_round": sum(1 for s in scored if s["validated"]),
+                "cumulative_validated": len(hall_of_fame),
+                "best": scored[0] if scored else None,
+                "reasoning": _loop_reasoning(scored, len(hall_of_fame), target_validated),
+            })
+            report["flash_scaling_chart"] = design.get("flash_scaling_chart") or report.get("flash_scaling_chart")
+            report["last_flash_autoscaling"] = design.get("flash_autoscaling") or report.get("last_flash_autoscaling")
+
+            if len(hall_of_fame) >= target_validated:
+                report["stop_reason"] = f"reached target_validated={target_validated}"
+                break
+            if rnd == max_rounds:
+                report["stop_reason"] = f"reached max_rounds={max_rounds}"
+                break
+            # Can't fold mutated variants -> evolving further would optimize on invented
+            # fitness. Stop honestly instead (seeds had committed-library scores; children won't).
+            if not fold_oracle_available or fresh_fold_hits == 0:
+                report["stop_reason"] = (
+                    "fold oracle produced no fresh scores — cannot honestly score mutated variants "
+                    "(no local boltz/torch toolchain and the Flash fold endpoint did not engage)."
+                )
+                break
+
+            # Breed the next generation from the best non-rejected survivors.
+            survivors = [s for s in scored if s["verdict"] != "REJECTED_LOW_COMPLEXITY"]
+            survivors = (survivors or scored)[: max(2, variants_per_round // 2)]
+            children: list[dict[str, Any]] = []
+            attempts = 0
+            while len(children) < variants_per_round and attempts < variants_per_round * 25:
+                attempts += 1
+                parent = rng.choice(survivors)
+                child_seq = _mutate_peptide(parent["seq"], mutations_per_variant, rng)
+                if child_seq in seen_seqs or _sequence_complexity(child_seq)["is_low_complexity"]:
+                    continue
+                seen_seqs.add(child_seq)
+                children.append({"name": f"loop_r{rnd + 1}_{len(children)}", "seq": child_seq,
+                                 "origin": f"mut({parent['name']})"})
+            # Carry the two best survivors forward so good binders survive mutation pressure.
+            population = survivors[:2] + children
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    validated_library = sorted(
+        hall_of_fame.values(),
+        key=lambda x: ((x["project_plddt"] or 0.0) + (x["bionemo_confidence"] or 0.0)) / 2.0,
+        reverse=True,
+    )
+    report["rounds"] = rounds_trace
+    report["rounds_run"] = len(rounds_trace)
+    report["validated_library"] = validated_library
+    report["validated_count"] = len(validated_library)
+    report.setdefault("stop_reason", "loop ended")
+    report["summary"] = (
+        f"target {target_gene}: ran {len(rounds_trace)} design round(s); "
+        f"{len(validated_library)} binder(s) independently corroborated by BioNeMo. "
+        f"Search oracle = project Boltz-2 fold; acceptance oracle = BioNeMo (distinct models, "
+        f"so the search can't overfit its own scorer). Stop: {report['stop_reason']}."
+    )
+    return report
+
+
+# --------------------------------------------------------------------------- #
 # Entry
 # --------------------------------------------------------------------------- #
 async def _selftest() -> int:
@@ -906,6 +1194,19 @@ async def _selftest() -> int:
     for v in rep.get("verified_candidates", []):
         print(f"  - {v['name']}: project={v['project_plddt']} bionemo={v['bionemo_confidence']} "
               f"-> {v['verdict']} (validated={v['validated']})")
+
+    # Local, no-Flash, single round: seeds fall back to committed-library fold scores and
+    # are validated by the independent verifier. Demonstrates the loop's contract without a
+    # live fold endpoint (mutated-variant rounds need one; this stops honestly after round 1).
+    print("\n== autonomous_design_loop (1 round, local) ==")
+    loop = await autonomous_design_loop(target_gene="EGFR", use_flash=False, max_rounds=1)
+    print("summary:", loop.get("summary"))
+    for rt in loop.get("rounds", []):
+        print(f"  round {rt['round']}: fresh_folds={rt['fresh_folds']} "
+              f"validated_now={rt['validated_this_round']} -> {rt['reasoning']}")
+    for c in loop.get("validated_library", []):
+        print(f"  VALIDATED {c['name']}: project={c['project_plddt']} ({c['plddt_source']}) "
+              f"bionemo={c['bionemo_confidence']} verdict={c['verdict']}")
     return 0
 
 

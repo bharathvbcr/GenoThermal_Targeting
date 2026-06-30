@@ -185,6 +185,8 @@ def _train_and_generate(timesteps=10000, length=200, seed=None):
     # ProgressCallback but with actual metrics, inlined to keep this module self-contained).
     from stable_baselines3.common.callbacks import BaseCallback
 
+    reward_history = []  # (timesteps, ep_rew_mean) per rollout -> returned for the learning-curve plot
+
     class _PPOProgress(BaseCallback):
         def _on_step(self) -> bool:
             return True
@@ -194,6 +196,7 @@ def _train_and_generate(timesteps=10000, length=200, seed=None):
             if buf:
                 mean_r = sum(ep["r"] for ep in buf) / len(buf)
                 mean_l = sum(ep["l"] for ep in buf) / len(buf)
+                reward_history.append((int(self.num_timesteps), float(mean_r)))
             else:
                 mean_r = mean_l = float("nan")
             stats = getattr(self.model.logger, "name_to_value", {}) or {}  # train/* lags one update
@@ -223,7 +226,10 @@ def _train_and_generate(timesteps=10000, length=200, seed=None):
         done = terminated or truncated
     seq = gen.to_str()
     logger.info("Generated sequence (first 30bp): %s... | fitness=%.4f", seq[:30], reward)
-    return {"sequence": seq, "predicted_fitness": float(reward), "seed": seed}
+    # reward_history travels back in the payload so the LOCAL driver can plot the learning
+    # curve even when training ran on a remote Flash worker.
+    return {"sequence": seq, "predicted_fitness": float(reward), "seed": seed,
+            "reward_history": reward_history}
 
 
 # --- Phase 9: OpenMM thermal-switch verification (self-contained) ---------
@@ -448,6 +454,91 @@ def _module_missing(mod: str) -> bool:
     return importlib.util.find_spec(mod) is None
 
 
+# --- Figures (so Phases 8 & 9 are no longer chart-less in the rollup) ------
+FIGURES_DIR = os.path.join("outputs", "figures")
+REPORTS_DIR = os.path.join("outputs", "reports")
+
+
+def _render_ppo_curve(out: dict):
+    """Plot the PPO learning curve(s) from the reward_history carried in the result payload.
+    Handles a single run ({reward_history}) and a sweep ({best, all})."""
+    runs = out.get("all") if isinstance(out.get("all"), list) else [out]
+    series = [(r.get("seed"), r.get("reward_history") or []) for r in runs if isinstance(r, dict)]
+    series = [(s, h) for s, h in series if h]
+    if not series:
+        logger.info("PPO: no reward_history to plot (skipping learning-curve figure).")
+        return None
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import csv as _csv
+    except ImportError:
+        logger.warning("matplotlib not available — skipping PPO learning-curve figure.")
+        return None
+
+    os.makedirs(FIGURES_DIR, exist_ok=True)
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for seed, hist in series:
+        xs = [t for t, _ in hist]
+        ys = [r for _, r in hist]
+        ax.plot(xs, ys, marker="o", ms=3, lw=1.5, label=f"seed {seed}" if seed is not None else "PPO")
+    ax.set_xlabel("Training timesteps")
+    ax.set_ylabel("Mean episode reward (promoter fitness)")
+    ax.set_title("Phase 8 — PPO RL promoter design: learning curve")
+    ax.grid(alpha=0.3)
+    if len(series) > 1:
+        ax.legend(fontsize=8, ncol=2)
+    png = os.path.join(FIGURES_DIR, "ppo_reward_curve.png")
+    fig.tight_layout()
+    fig.savefig(png, dpi=150)
+    plt.close(fig)
+
+    # Also persist the best run's curve as CSV (version-friendly; tensorboard dir is gitignored).
+    best = out.get("best") or out
+    csv_path = os.path.join(REPORTS_DIR, "ppo_reward_log.csv")
+    with open(csv_path, "w", newline="") as f:
+        w = _csv.writer(f)
+        w.writerow(["timesteps", "ep_rew_mean"])
+        w.writerows(best.get("reward_history") or [])
+    logger.info("PPO learning curve saved to %s (and %s)", png, csv_path)
+    return png
+
+
+def _render_rmsd(out: dict):
+    """Bar chart of the OpenMM thermal-switch RMSD at 37°C vs 43°C with the pass threshold."""
+    if "rmsd_37C" not in out or "rmsd_43C" not in out:
+        logger.info("MD: no RMSD values to plot (skipping physics figure).")
+        return None
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib not available — skipping physics RMSD figure.")
+        return None
+
+    os.makedirs(FIGURES_DIR, exist_ok=True)
+    r37, r43 = out["rmsd_37C"], out["rmsd_43C"]
+    passed = out.get("thermal_switch_verified")
+    fig, ax = plt.subplots(figsize=(6, 5))
+    bars = ax.bar(["37°C (body)", "43°C (hyperthermia)"], [r37, r43],
+                  color=["#1f77b4", "#d62728"])
+    ax.axhline(0.5, ls="--", color="gray", lw=1, label="stability threshold (0.5 nm)")
+    ax.set_ylabel("Backbone RMSD vs start (nm)")
+    ax.set_title(f"Phase 9 — Thermal-switch MD: {'PASS' if passed else 'FAIL'} "
+                 f"(unfolds on heating)")
+    ax.bar_label(bars, fmt="%.3f")
+    ax.legend(fontsize=8)
+    png = os.path.join(FIGURES_DIR, "physics_rmsd.png")
+    fig.tight_layout()
+    fig.savefig(png, dpi=150)
+    plt.close(fig)
+    logger.info("Physics RMSD chart saved to %s", png)
+    return png
+
+
 if __name__ == "__main__":
     import argparse
     import json
@@ -507,4 +598,15 @@ if __name__ == "__main__":
             logger.info("MD: PDB loaded (%d chars). Running locally (no Flash).", len(pdb_text))
             out = _verify_physics(pdb_text)
 
-    logger.info("Output:\n%s", __import__("json").dumps(out, indent=2))
+    # Render the phase's figure so Phases 8 & 9 are represented in the unified report.
+    try:
+        if args.phase == "ppo":
+            _render_ppo_curve(out)
+        else:
+            _render_rmsd(out)
+    except Exception as e:  # a figure is best-effort; never fail the phase over it
+        logger.warning("Figure rendering failed (%s) — phase output is unaffected.", e)
+
+    # Don't dump the (potentially long) reward_history into the terminal JSON.
+    _printable = {k: v for k, v in out.items() if k != "reward_history"} if isinstance(out, dict) else out
+    logger.info("Output:\n%s", __import__("json").dumps(_printable, indent=2))

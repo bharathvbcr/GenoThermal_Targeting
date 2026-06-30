@@ -309,6 +309,7 @@ of it duplicates logic.
 | `run_full_pipeline` | `run_pipeline.py` | Runs all 12 phases end to end (`smoke=True` for a <1-minute demo). |
 | `design_promoter_flash` | `hard_mode/evolver.py` | Evolves a hyperthermia-gated promoter; with `use_flash=True` the GA's fitness scoring fans out on the RunPod Flash fleet (0->N->0). `mode` in the response reflects whether Flash genuinely engaged this call, not just what was requested. |
 | `screen_and_verify` | the above, chained | One-call discover -> design -> (Flash promoter GA) -> verify loop; the headline demo artifact. |
+| `autonomous_design_loop` | `design_ligands` + `verify_with_bionemo`, iterated | The one **net-new** tool (not a wrapper): a closed design loop that folds binders on the project's own Boltz-2/Flash path (search oracle), validates each on the *independent* BioNeMo verifier (acceptance oracle), then mutates the best survivors — repeating until enough binders are independently corroborated. The two oracles are different models, so the search cannot overfit its own scorer; it stops honestly (`fold_oracle_available: false`) instead of evolving mutated variants on invented fitness when no live fold runs. Returns the validated library plus a per-round reasoning trace. |
 
 Registration lives in `.mcp.json` under the server name `geno-thermal-targeting`,
 launched with `.venv-flash/bin/python mcp_geno_thermal.py` (the plain `venv/`

@@ -47,6 +47,8 @@ FIGURE_CAPTIONS = {
     "nano_surface.png": "Phase 6 — Nanoparticle surface topology",
     "circuit_heatmap_narrative.png": "Phase 7 — Biological AND-gate kill-switch response",
     "circuit_heatmap.png": "Phase 7 — Biological circuit kill-switch heatmap",
+    "ppo_reward_curve.png": "Phase 8 — PPO RL promoter design: learning curve",
+    "physics_rmsd.png": "Phase 9 — Thermal-switch MD: RMSD at 37°C vs 43°C",
     "therapeutic_window.png": "Phase 9 — Therapeutic window: tumor vs normal kill curves",
     "panel_selectivity_heatmap.png": "Target panel — cross-target selectivity heatmap",
     "flash_scaling.png": "RunPod Flash — 0→N→0 autoscaling concurrency & cost",
@@ -259,10 +261,15 @@ def build_html_report():
     if body:
         sections.append(("Phases 5–7 — Thermo-switch · Nanoparticle · Bio-circuit", body))
 
-    # ---- Phase 9: therapeutic window ----
-    body = fig("therapeutic_window.png")
+    # ---- Phase 8: RL design (learning curve) ----
+    body = fig("ppo_reward_curve.png")
     if body:
-        sections.append(("Phase 9 — Therapeutic Window", body))
+        sections.append(("Phase 8 — RL-Driven Sequence Design (PPO)", body))
+
+    # ---- Phase 9: physics + therapeutic window ----
+    body = fig("physics_rmsd.png") + fig("therapeutic_window.png")
+    if body:
+        sections.append(("Phase 9 — Physics Verification & Therapeutic Window", body))
 
     # ---- Flash fan-out ----
     if flash:

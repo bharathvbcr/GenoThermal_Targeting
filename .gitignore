@@ -41,6 +41,10 @@ __pycache__/
 # Machine-local Claude Code settings (per-machine permissions, not shared)
 .claude/settings.local.json
 
+# Stdout capture + partial/in-progress fold artifacts (regenerated each run)
+pipeline_run.out
+*.partial.csv
+
 # Training/run dumps (regenerated each run)
 ppo_gene_tensorboard/
 *.sqlite
