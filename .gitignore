@@ -1,8 +1,9 @@
 # Flash run artifacts (regenerated each run)
 flash_metrics.json
 flash_scaling.png
-# Live monitor status snapshot (regenerated each run by pipeline_monitor.py)
+# Live monitor status snapshot + shareable static export (regenerated each run by pipeline_monitor.py)
 outputs/reports/pipeline_status.json
+outputs/reports/pipeline_report.html
 _preflight*.json
 _preflight*.png
 

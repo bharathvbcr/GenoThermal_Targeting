@@ -279,6 +279,16 @@ class PipelineMonitor:
             p["reason"] = reason
             self._write_snapshot_locked()
 
+    def skip_remaining(self, reason="aborted"):
+        """Mark every still-queued phase as skipped (used when a required phase aborts
+        the run, so the flow doesn't leave later phases stuck on 'queued')."""
+        with self._lock:
+            for p in self._phases:
+                if p["status"] == "pending":
+                    p["status"] = "skipped"
+                    p["reason"] = reason
+            self._write_snapshot_locked()
+
     def finish(self, failures=None):
         with self._lock:
             self._overall = "complete_with_failures" if (failures or self._failures) else "complete"
@@ -286,6 +296,11 @@ class PipelineMonitor:
                 self._failures = failures
             self._ended_at = time.time()
             self._write_snapshot_locked()
+        # Write the shareable, server-free static report (outside the lock — it reads
+        # via snapshot()/helpers which take the lock themselves).
+        path = self.write_static_report()
+        if path:
+            logger.info("Shareable static report: %s  (self-contained — open or send anywhere)", path)
 
     # ----- internals -------------------------------------------------------
     def _ensure(self, label):
@@ -296,10 +311,48 @@ class PipelineMonitor:
                 "short": label.split(":", 1)[1].strip() if ":" in label else label,
                 "phase_no": "", "status": "pending",
                 "started_at": None, "ended_at": None, "elapsed": None,
+                "detail": None, "frac": None,
             }
             self._phases.append(p)
             self._by_label[label] = p
         return p
+
+    def write_static_report(self, path=STATIC_REPORT_PATH):
+        """Dump a single self-contained HTML file with the final state + metrics +
+        artifacts (images base64-inlined) so it renders with no server. Best-effort."""
+        try:
+            snap = self.snapshot()
+            try:
+                metrics = json.loads(_read_metrics() or "[]")
+            except Exception:
+                metrics = []
+            embedded = []
+            for a in _list_artifacts(self._started_at):
+                try:
+                    with open(a["path"], "rb") as f:
+                        raw = f.read()
+                    ctype = _content_type(a["path"]).split(";")[0]
+                    a2 = dict(a)
+                    a2["url"] = "data:%s;base64,%s" % (ctype, base64.b64encode(raw).decode())
+                    embedded.append(a2)
+                except Exception:
+                    continue
+            payload = {
+                "status": snap, "metrics": metrics,
+                "artifacts": embedded, "log": _tail_log(), "static": True,
+            }
+            # Escape "</" so a stray "</script>" inside any embedded string (log line,
+            # phase label) can't prematurely close the bootstrap <script> tag.
+            data = json.dumps(payload).replace("</", "<\\/")
+            boot = "<script>window.__GENOTHERMAL__=" + data + ";</script>"
+            html = _PAGE_HTML.replace("</head>", boot + "\n</head>")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(html)
+            return path
+        except Exception as e:
+            logger.debug("write_static_report failed: %s", e)
+            return None
 
     def snapshot(self):
         with self._lock:
@@ -546,6 +599,21 @@ _PAGE_HTML = r"""<!DOCTYPE html>
   .art.wide{grid-column:1 / -1}
   .gallery .empty{grid-column:1 / -1;color:var(--muted);font-size:12.5px;padding:4px 2px}
   @keyframes flash{0%{box-shadow:0 0 0 0 rgba(54,211,153,.6)}100%{box-shadow:0 0 0 10px rgba(54,211,153,0)}}
+  /* per-phase live sub-progress inside a running card */
+  .sub{margin-top:9px}
+  .sub .sbar{height:5px;border-radius:4px;background:#1a2747;overflow:hidden}
+  .sub .sbar>i{display:block;height:100%;background:linear-gradient(90deg,var(--running),var(--ok));width:0;transition:width .4s}
+  .sub .sdet{margin-top:5px;font-size:11px;color:var(--running);font-variant-numeric:tabular-nums;
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* "where the wall-time went" durations chart */
+  .durow{display:grid;grid-template-columns:150px 1fr 56px;align-items:center;gap:10px;margin:6px 0;font-size:12px}
+  .durow .dlbl{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .durow .dbar{height:10px;background:#16203b;border-radius:5px;overflow:hidden}
+  .durow .dbar>i{display:block;height:100%;border-radius:5px;background:var(--accent)}
+  .durow .dbar>i.success{background:linear-gradient(90deg,var(--accent),var(--ok))}
+  .durow .dbar>i.failed,.durow .dbar>i.optional-failed{background:var(--fail)}
+  .durow .dbar>i.skipped{background:#33405f}
+  .durow .dval{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
 </style>
 </head>
 <body>
@@ -560,6 +628,7 @@ _PAGE_HTML = r"""<!DOCTYPE html>
   <div>
     <div id="banner"></div>
     <div id="lanes"></div>
+    <div id="durations"></div>
   </div>
   <div class="side">
     <div class="panel">
@@ -643,15 +712,38 @@ function render(st){
       else if(p.elapsed!=null) et = p.elapsed.toFixed(2)+"s";
       else if(p.status==="skipped") et = "skipped";
       else et = "queued";
+      let sub="";
+      if(p.status==="running" && (p.detail || p.frac!=null)){
+        const w = p.frac!=null ? Math.round(100*p.frac) : null;
+        sub = `<div class="sub">${w!=null?`<div class="sbar"><i style="width:${w}%"></i></div>`:""}
+          ${p.detail?`<div class="sdet">${p.detail}${w!=null?` · ${w}%`:""}</div>`:""}</div>`;
+      }
       html += `<div class="card ${p.status}">
         <div class="no">${p.phase_no||""}</div>
         <div class="name">${p.short}</div>
         <div class="meta"><span class="ico">${ICON[p.status]||""}</span>
-        <span class="et">${et}</span></div></div>`;
+        <span class="et">${et}</span></div>${sub}</div>`;
     }
     html += `</div></div>`;
   }
   document.getElementById("lanes").innerHTML = html;
+  renderDurations(st);
+}
+
+function renderDurations(st){
+  const el = document.getElementById("durations");
+  const ph = st.phases.filter(p=>p.elapsed!=null && p.elapsed>0).sort((a,b)=>b.elapsed-a.elapsed);
+  if(!ph.length){ el.innerHTML=""; return; }
+  const max = Math.max.apply(null, ph.map(p=>p.elapsed));
+  const totalT = ph.reduce((s,p)=>s+p.elapsed,0);
+  let h = `<div class="panel" style="margin-top:18px"><h2>⏱ Where the wall-time went · ${totalT.toFixed(1)}s of phase time</h2>`;
+  for(const p of ph){
+    const w = max? Math.max(2,100*p.elapsed/max):0;
+    h += `<div class="durow"><span class="dlbl" title="${p.short}">${p.short}</span>
+      <span class="dbar"><i class="${p.status}" style="width:${w}%"></i></span>
+      <span class="dval">${p.elapsed.toFixed(2)}s</span></div>`;
+  }
+  el.innerHTML = h + `</div>`;
 }
 
 function renderFlash(metrics){
@@ -682,7 +774,7 @@ function renderGallery(arts){
   }
   let html="";
   for(const a of arts){
-    const href = "/file?path="+encodeURIComponent(a.path);
+    const href = a.url ? a.url : "/file?path="+encodeURIComponent(a.path);
     const fresh = a.fresh ? " fresh":"";
     const wide = a.name==="summary_report.html" ? " wide":"";
     if(a.kind==="image"){
@@ -697,6 +789,13 @@ function renderGallery(arts){
   el.innerHTML = html;
 }
 
+function setLog(t){
+  const el = document.getElementById("log");
+  const atBottom = el.scrollTop+el.clientHeight >= el.scrollHeight-20;
+  el.textContent = t || "(no log yet)";
+  if(atBottom) el.scrollTop = el.scrollHeight;
+}
+
 async function tick(){
   try{
     const st = await (await fetch("/status.json",{cache:"no-store"})).json();
@@ -705,15 +804,23 @@ async function tick(){
   }catch(e){}
   try{ renderFlash(await (await fetch("/metrics.json",{cache:"no-store"})).json()); }catch(e){}
   try{ renderGallery(await (await fetch("/artifacts.json",{cache:"no-store"})).json()); }catch(e){}
-  try{
-    const t = await (await fetch("/log",{cache:"no-store"})).text();
-    const el = document.getElementById("log");
-    const atBottom = el.scrollTop+el.clientHeight >= el.scrollHeight-20;
-    el.textContent = t || "(no log yet)";
-    if(atBottom) el.scrollTop = el.scrollHeight;
-  }catch(e){}
+  try{ setLog(await (await fetch("/log",{cache:"no-store"})).text()); }catch(e){}
 }
-tick(); setInterval(tick, 800);
+
+// Static export (pipeline_report.html) inlines everything in window.__GENOTHERMAL__ and
+// renders once with no server / no fetch. The live page (no EMBED) polls instead.
+const EMBED = window.__GENOTHERMAL__ || null;
+if(EMBED){
+  render(EMBED.status);
+  renderFlash(EMBED.metrics||[]);
+  renderGallery(EMBED.artifacts||[]);
+  setLog(EMBED.log||"");
+  document.querySelector("h1 .dot").style.animation="none";
+  // mark the page as a saved snapshot
+  const b=document.getElementById("phaseProg"); if(b) b.textContent += " · saved snapshot";
+} else {
+  tick(); setInterval(tick, 800);
+}
 </script>
 </body>
 </html>

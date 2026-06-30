@@ -24,28 +24,53 @@ _console_handler.setFormatter(logging.Formatter(">> %(message)s"))
 logging.basicConfig(level=_LEVEL, handlers=[_file_handler, _console_handler])
 logger = logging.getLogger("PipelineMaster")
 
-def run_step(command, description):
+def run_step(command, description, monitor=None):
     # Use the SAME interpreter for child phases (the venue's `python` may lack our deps).
     if command.startswith("python "):
         command = f'"{sys.executable}" ' + command[len("python "):]
     logger.info(f"--- STEP: {description} ---")
     logger.info(f"Executing: {command}")
-    
+
+    # Tee the child's output: we still echo every line to this terminal live (so the GA
+    # fan-out's per-generation progress and the "[metrics] peak in-flight=N" lines ARE the
+    # demo's headline beat on screen), but we ALSO parse each line for sub-progress
+    # ("gen 23/50", "MC step 40,000/50,000") and feed it to the live monitor card. Child
+    # logging goes to stderr, so stderr is merged into stdout (STDOUT) to catch it.
+    # The child still writes its own *.log file independently.
+    tracker = None
+    if monitor is not None:
+        try:
+            from pipeline_monitor import ProgressTracker
+            tracker = ProgressTracker()
+        except Exception:
+            tracker = None
+
     start_time = time.time()
     try:
-        # Inherit the terminal (NO capture_output) so each phase's live logs scroll on screen
-        # as they happen — the GA fan-out's per-generation progress and the
-        # "[metrics] peak in-flight=N" lines ARE the demo's headline beat. Capturing them
-        # buffered them until the phase ended and hid them at the default INFO level.
-        # The child writes its own *.log file too, and stderr now goes straight to the
-        # console, so the failure path no longer needs e.stdout/e.stderr.
-        subprocess.run(command, shell=True, check=True)
+        proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                errors="replace")
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            if tracker is not None:
+                try:
+                    frac, detail = tracker.feed(line)
+                    if detail is not None or frac is not None:
+                        monitor.update_progress(description, detail, frac)
+                except Exception:
+                    pass
+        proc.wait()
         elapsed = time.time() - start_time
-        logger.info(f"SUCCESS: {description} (Time: {elapsed:.2f}s)")
-        return True
-    except subprocess.CalledProcessError as e:
+        if proc.returncode == 0:
+            logger.info(f"SUCCESS: {description} (Time: {elapsed:.2f}s)")
+            return True
+        logger.error(f"FAILED: {description} after {elapsed:.2f}s (exit {proc.returncode}) "
+                     f"— see this phase's output above and its *.log file.")
+        return False
+    except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"FAILED: {description} after {elapsed:.2f}s (exit {e.returncode}) "
+        logger.error(f"FAILED: {description} after {elapsed:.2f}s ({e}) "
                      f"— see this phase's output above and its *.log file.")
         return False
 
@@ -123,7 +148,7 @@ def main():
         if monitor:
             monitor.start_phase(description)
         start = time.time()
-        ok = run_step(command, description)
+        ok = run_step(command, description, monitor)
         if monitor:
             monitor.end_phase(description, ok, elapsed=time.time() - start, optional=optional)
         if ok:
@@ -133,6 +158,8 @@ def main():
             logger.warning("Continuing past failed phase: %s", description)
             return False
         if monitor:
+            # Required phase aborted the run — don't leave later phases stuck on "queued".
+            monitor.skip_remaining(reason="aborted after failed phase: " + description)
             monitor.finish(failures)
         sys.exit(1)
 

@@ -189,9 +189,13 @@ def _intel_remote(targets: list, api_token: str, n_results: int, timeout_s: int 
                 metrics.done(rec, ok=True)
                 return result
             except Exception as e:
-                logger.warning("Intel job for %s failed (%s); using local stub.", target, e)
+                # A dead/cold worker shouldn't downgrade us to FAKE data when a real local
+                # Bright Data call still works. Try the live local REST call first; that
+                # function only stubs if IT also fails (no token / no network).
+                logger.warning("Intel job for %s failed on the worker (%s); retrying via a "
+                               "live LOCAL Bright Data call.", target, e)
                 metrics.done(rec, ok=False)
-                return _local_stub(target)  # reliability: a dead worker still yields a record
+                return fetch_target_intel(target, api_token, n_results)
 
         return await asyncio.gather(*(_await(t) for t in targets))
 
