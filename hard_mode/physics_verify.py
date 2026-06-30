@@ -14,7 +14,7 @@ import logging
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("GENOTHERMAL_LOG_LEVEL", "INFO").upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("physics_verify.log"),
@@ -40,7 +40,7 @@ except ImportError:
     logger.warning("pdbfixer not installed. Topology issues may occur.")
 
 # Configuration
-PDB_FILE = "simulated_pdbs/unknown_complex.pdb"
+PDB_FILE = "outputs/simulated_pdbs/unknown_complex.pdb"
 FORCEFIELD_TYPE = 'amber14-all.xml'
 WATER_MODEL = 'amber14/tip3p.xml'
 SIMULATION_STEPS = 5000 
@@ -49,72 +49,84 @@ REPORT_INTERVAL = 100
 def fix_pdb(pdb_file):
     """Uses pdbfixer to fix common topology issues in AlphaFold PDBs."""
     if not PDBFIXER_AVAILABLE:
+        logger.debug("fix_pdb: pdbfixer unavailable, returning original file.")
         return pdb_file
-    
-    logger.info(f"Fixing PDB: {pdb_file}")
+
+    logger.info("fix_pdb: fixing %s", pdb_file)
     fixer = PDBFixer(filename=pdb_file)
+    logger.debug("fix_pdb: findMissingResidues...")
     fixer.findMissingResidues()
+    logger.debug("fix_pdb: findNonstandardResidues / replaceNonstandardResidues...")
     fixer.findNonstandardResidues()
     fixer.replaceNonstandardResidues()
+    logger.debug("fix_pdb: findMissingAtoms / addMissingAtoms...")
     fixer.findMissingAtoms()
     fixer.addMissingAtoms()
+    logger.debug("fix_pdb: addMissingHydrogens (pH 7.0)...")
     fixer.addMissingHydrogens(7.0)
-    
+
     fixed_pdb = pdb_file.replace(".pdb", "_fixed.pdb")
     with open(fixed_pdb, "w") as f:
         app.PDBFile.writeFile(fixer.topology, fixer.positions, f)
+    logger.info("fix_pdb: fixed PDB written to %s", fixed_pdb)
     return fixed_pdb
 
 def setup_simulation(pdb_file, temperature_kelvin):
-    logger.info(f"--- Setting up simulation for {pdb_file} at {temperature_kelvin}K ---")
-    
-    # Optional: Fix PDB first
+    logger.info("setup_simulation: %s at %.2f K", pdb_file, temperature_kelvin)
+
     if PDBFIXER_AVAILABLE:
+        logger.debug("setup_simulation: running fix_pdb...")
         pdb_file = fix_pdb(pdb_file)
 
+    logger.debug("setup_simulation: loading PDB from %s", pdb_file)
     pdb = app.PDBFile(pdb_file)
+    logger.debug("setup_simulation: creating ForceField (%s, %s)", FORCEFIELD_TYPE, WATER_MODEL)
     forcefield = app.ForceField(FORCEFIELD_TYPE, WATER_MODEL)
-    
+
+    logger.debug("setup_simulation: building Modeller...")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     if not PDBFIXER_AVAILABLE:
+        logger.debug("setup_simulation: addHydrogens (pdbfixer absent)...")
         modeller.addHydrogens(forcefield)
-    
+
+    logger.debug("setup_simulation: addSolvent (padding=1.0 nm)...")
     modeller.addSolvent(forcefield, padding=1.0*unit.nanometers)
-    
+
+    logger.debug("setup_simulation: createSystem (PME, HBonds)...")
     system = forcefield.createSystem(
-        modeller.topology, 
-        nonbondedMethod=app.PME, 
-        nonbondedCutoff=1.0*unit.nanometers, 
+        modeller.topology,
+        nonbondedMethod=app.PME,
+        nonbondedCutoff=1.0*unit.nanometers,
         constraints=app.HBonds
     )
-    
+
+    logger.debug("setup_simulation: LangevinMiddleIntegrator at %.2f K", temperature_kelvin)
     integrator = mm.LangevinMiddleIntegrator(
-        temperature_kelvin * unit.kelvin, 
-        1.0/unit.picosecond, 
+        temperature_kelvin * unit.kelvin,
+        1.0/unit.picosecond,
         0.002*unit.picoseconds
     )
-    
-    # Try to use GPU Acceleration (CUDA then OpenCL), fallback to CPU
+
     platform = None
     props = {}
-    
     for platform_name in ['CUDA', 'OpenCL']:
         try:
             platform = mm.Platform.getPlatformByName(platform_name)
             if platform_name == 'CUDA':
                 props = {'Precision': 'mixed'}
-            logger.info(f"Using Platform: {platform_name} (GPU Accelerated)")
+            logger.info("setup_simulation: using platform %s (GPU accelerated)", platform_name)
             break
-        except Exception:
-            continue
-            
+        except Exception as _plat_err:
+            logger.debug("setup_simulation: platform %s unavailable (%s), trying next.", platform_name, _plat_err)
+
     if platform is None:
         platform = mm.Platform.getPlatformByName('CPU')
-        logger.info("Using Platform: CPU (Warning: Slow for MD)")
-        
+        logger.warning("setup_simulation: falling back to CPU platform (MD will be slow).")
+
+    logger.debug("setup_simulation: creating Simulation object...")
     simulation = app.Simulation(modeller.topology, system, integrator, platform, props)
     simulation.context.setPositions(modeller.positions)
-    
+    logger.info("setup_simulation: simulation ready (%.2f K).", temperature_kelvin)
     return simulation
 
 def run_md_protocol(simulation, name):
@@ -145,7 +157,9 @@ def calculate_rmsd(pos1, pos2):
     p1 = np.array(pos1.value_in_unit(unit.nanometers))
     p2 = np.array(pos2.value_in_unit(unit.nanometers))
     diff = p1 - p2
-    return np.sqrt((diff * diff).sum() / len(p1))
+    result = float(np.sqrt((diff * diff).sum() / len(p1)))
+    logger.debug("calculate_rmsd: n_atoms=%d, RMSD=%.4f nm", len(p1), result)
+    return result
 
 def verify_thermal_switch(pdb_path):
     try:

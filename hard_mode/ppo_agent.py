@@ -8,6 +8,8 @@ This script trains a Reinforcement Learning agent (Proximal Policy Optimization)
 to write DNA sequences that maximize the 'Fitness Reward' provided by the environment.
 """
 
+import os
+import sys
 import gymnasium as gym
 import numpy as np
 import logging
@@ -15,20 +17,22 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 
-# Import our Custom Environment
-# Ensure 'hard_mode' is in python path or accessible
+# Logging Setup — defined BEFORE the import fallback so the except branch can log safely
+# (previously logger was referenced here before it existed -> NameError on the fallback path).
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("GENOTHERMAL_LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format='%(asctime)s - %(levelname)s - %(message)s',
+)
+logger = logging.getLogger("PPO_Trainer")
+
+# Import our Custom Environment (ensure 'hard_mode' is on the python path or accessible)
 try:
     from rl_gene_designer import PromoterDesignEnv
 except ImportError:
-    # If running from root directory
-    import sys
-    import os
+    logger.warning("rl_gene_designer not on path; retrying from hard_mode/ subdirectory.")
     sys.path.append(os.path.join(os.getcwd(), 'hard_mode'))
     from rl_gene_designer import PromoterDesignEnv
-
-# Logging Setup
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("PPO_Trainer")
+    logger.info("rl_gene_designer loaded via hard_mode/ path.")
 
 # --- CUSTOM CALLBACK ---
 class ProgressCallback(BaseCallback):
@@ -49,37 +53,32 @@ class ProgressCallback(BaseCallback):
         return True
 
 # --- TRAINING PIPELINE ---
-def train_agent():
+def train_agent(total_timesteps=10000):
     logger.info("Initializing PPO Training Pipeline...")
-    
-    # 1. Setup Environment
-    # We use a wrapper to vectorize it (Standard for Stable Baselines)
+
+    logger.info("train_agent: total_timesteps=%d", total_timesteps)
     env = DummyVecEnv([lambda: PromoterDesignEnv(target_length=200)])
-    
-    # 2. Define PPO Model
-    # Policy: MlpPolicy (Multi-Layer Perceptron) because input is a flat vector of integers
-    # Hyperparameters tuned for discrete sequence generation:
-    # - learning_rate: 0.0003 (Standard)
-    # - n_steps: 2048 (Batch size)
-    # - gamma: 0.99 (Discount factor - we care about the final reward)
+    logger.info("DummyVecEnv created (target_length=200).")
+
+    n_steps = min(2048, total_timesteps)
+    batch_size = min(64, n_steps)
+    logger.info("PPO config: n_steps=%d, batch_size=%d, lr=0.0003, gamma=0.99", n_steps, batch_size)
     model = PPO(
-        "MlpPolicy", 
-        env, 
+        "MlpPolicy",
+        env,
         verbose=1,
         learning_rate=0.0003,
-        n_steps=2048, 
-        batch_size=64,
+        n_steps=n_steps,
+        batch_size=batch_size,
         gamma=0.99,
-        tensorboard_log="./ppo_gene_tensorboard/"
+        tensorboard_log="./outputs/ppo_gene_tensorboard/"
     )
-    
-    # 3. Train
-    logger.info("Starting PPO Learning Loop (50,000 timesteps)...")
-    # In a real scenario, we'd run for millions of steps. 
-    # For this demo, 10,000 is enough to see 'learning' of TATA boxes.
-    model.learn(total_timesteps=10000, callback=ProgressCallback())
-    
-    # 4. Save Model
+    logger.info("PPO model built (MlpPolicy).")
+
+    logger.info("Starting PPO Learning Loop (%d timesteps)...", total_timesteps)
+    model.learn(total_timesteps=total_timesteps, callback=ProgressCallback())
+    logger.info("PPO training complete.")
+
     model.save("hard_mode/best_promoter_agent")
     logger.info("Model saved to 'hard_mode/best_promoter_agent.zip'")
     
@@ -90,35 +89,34 @@ def generate_sequence(model, length=200):
     """
     Uses the trained agent to write a new DNA sequence.
     """
-    logger.info("Generating new promoter design with trained agent...")
-    
-    # Create a fresh environment for inference
+    logger.info("Generating new promoter design with trained agent (length=%d)...", length)
+
     env = PromoterDesignEnv(target_length=length)
     obs, _ = env.reset()
-    
+    logger.debug("Environment reset; starting deterministic rollout.")
+
     done = False
+    step_count = 0
     while not done:
-        # Predict action (deterministic=False allows for some exploration/creativity)
         action, _states = model.predict(obs, deterministic=True)
-        
-        # Ensure action is an integer (SB3 returns numpy array)
+
         if isinstance(action, np.ndarray):
             action = int(action.item())
-            
+
         obs, reward, terminated, truncated, info = env.step(action)
+        step_count += 1
         done = terminated or truncated
-        
+
     dna = env._indices_to_string(env.sequence)
+    logger.info("Generation complete: %d steps, fitness=%.4f", step_count, reward)
+    logger.info("Generated sequence (first 30bp): %s...", dna[:30])
     return dna, reward
 
 if __name__ == "__main__":
-    # Train
     trained_model = train_agent()
-    
-    # Generate
+
     best_dna, score = generate_sequence(trained_model, length=200)
-    
-    print("\n--- PPO Agent Design Complete ---")
-    print(f"Generated Sequence (200bp):")
-    print(f"{best_dna}")
-    print(f"Predicted Fitness Score: {score:.2f}")
+
+    logger.info("--- PPO Agent Design Complete ---")
+    logger.info("Generated Sequence (200bp): %s", best_dna)
+    logger.info("Predicted Fitness Score: %.2f", score)

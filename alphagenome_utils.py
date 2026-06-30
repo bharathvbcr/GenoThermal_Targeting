@@ -12,7 +12,7 @@ import random
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("GENOTHERMAL_LOG_LEVEL", "INFO").upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("AlphaGenomeClient")
@@ -23,6 +23,7 @@ try:
     from alphagenome.models import variant_scorers
     ALPHAGENOME_AVAILABLE = True
 except ImportError:
+    logger.warning("alphagenome package not installed — all API calls will use local fallback.")
     ALPHAGENOME_AVAILABLE = False
 
 
@@ -56,16 +57,21 @@ class AlphaGenomeClient:
 
     def parse_fasta(self, file_path):
         """Parse a FASTA file and return the raw sequence string."""
+        logger.info("parse_fasta: reading %s", file_path)
         try:
             with open(file_path, "r") as f:
                 lines = f.readlines()
-                seq = "".join(line.strip() for line in lines if not line.startswith(">"))
-                return seq
+            logger.debug("parse_fasta: read %d lines from %s", len(lines), file_path)
+            seq = "".join(line.strip() for line in lines if not line.startswith(">"))
+            logger.info("parse_fasta: parsed sequence of %d bp from %s", len(seq), file_path)
+            return seq
         except FileNotFoundError:
-            logger.warning(f"{file_path} not found. Using placeholder sequence.")
+            logger.warning("%s not found. Using placeholder sequence.", file_path)
             return "ATCGGCTAACGGCTAACTTAGCCTAACGTTAACCGGTTATATCGGCTAA"
 
     def get_expression_score(self, gene_id, normal_seq, mutated_seq):
+        logger.info("get_expression_score: gene=%s, mode=%s, normal_len=%d, mutated_len=%d",
+                    gene_id, self._mode, len(normal_seq), len(mutated_seq))
         if self._mode == "API":
             return self._api_expression(gene_id, normal_seq, mutated_seq)
         return self._local_expression(gene_id, normal_seq, mutated_seq)
@@ -90,9 +96,15 @@ class AlphaGenomeClient:
         ]
         ontology = ["UBERON:0002367"] 
 
-        logger.info(f"Querying AlphaGenome API for {gene_id}...")
+        logger.info("Querying AlphaGenome API for %s (2 predict_sequence calls, padded_len=%d, outputs=%s)...",
+                    gene_id, min_len, [o.name for o in requested])
+        _t0 = _time.time()
         out_normal = self.model.predict_sequence(sequence=padded_normal, requested_outputs=requested, ontology_terms=ontology)
+        logger.info("AlphaGenome predict_sequence(normal) for %s done in %.2fs", gene_id, _time.time() - _t0)
+        _t1 = _time.time()
         out_mutated = self.model.predict_sequence(sequence=padded_mutated, requested_outputs=requested, ontology_terms=ontology)
+        logger.info("AlphaGenome predict_sequence(mutated) for %s done in %.2fs (total API %.2fs)",
+                    gene_id, _time.time() - _t1, _time.time() - _t0)
 
         def _cage_score(output):
             vals = output.cage.values
@@ -102,9 +114,11 @@ class AlphaGenomeClient:
 
         normal_score = _cage_score(out_normal)
         mutated_score = _cage_score(out_mutated)
+        logger.debug("Raw CAGE scores: normal=%.4f, mutated=%.4f", normal_score, mutated_score)
         max_val = max(abs(normal_score), abs(mutated_score), 1e-8)
         normal_score_pct = (normal_score / max_val) * 50
         mutated_score_pct = (mutated_score / max_val) * 50
+        logger.info("Normalised scores: normal=%.2f%%, mutated=%.2f%%", normal_score_pct, mutated_score_pct)
 
         def _histone_level(output, keyword):
             meta = output.chip_histone.metadata
@@ -122,12 +136,16 @@ class AlphaGenomeClient:
         }
 
         delta = mutated_score_pct - normal_score_pct
+        logger.debug("Delta CAGE: %.2f", delta)
         if delta > 15:
             classification = "SUPER_ENHANCER"
             confidence = min(0.99, 0.7 + delta / 100)
         else:
             classification = "NORMAL"
-            confidence = max(0.5, 0.9 - delta / 100)
+            # delta can be negative (mutated < normal); clamp into a valid [0.5, 0.99]
+            # probability — a more-negative delta means a more confident NORMAL call.
+            confidence = min(0.99, max(0.5, 0.9 - delta / 100))
+        logger.info("API expression result: classification=%s, confidence=%.2f", classification, confidence)
 
         return {
             "gene_id": gene_id,
@@ -141,15 +159,19 @@ class AlphaGenomeClient:
         }
 
     def _local_expression(self, gene_id, normal_seq, mutated_seq):
-        logger.info(f"[LOCAL FALLBACK] Estimating expression for {gene_id}...")
+        logger.info("[LOCAL FALLBACK] Estimating expression for %s (normal_len=%d, mutated_len=%d)...",
+                    gene_id, len(normal_seq), len(mutated_seq))
         if normal_seq == mutated_seq:
+            logger.debug("Sequences are identical — classifying as NORMAL.")
             mutated_score = 12.5
             classification = "NORMAL"
         else:
+            logger.debug("Sequences differ — classifying as SUPER_ENHANCER.")
             mutated_score = 85.0
             classification = "SUPER_ENHANCER"
 
         epi = {"H3K27ac": "High", "H3K4me1": "High", "H3K27me3": "Low"} if classification == "SUPER_ENHANCER" else {"H3K27ac": "Low", "H3K4me1": "Low", "H3K27me3": "High"}
+        logger.info("[LOCAL FALLBACK] Result: %s, mutated_score=%.1f, confidence=0.98", classification, mutated_score)
 
         return {
             "gene_id": gene_id,
@@ -163,7 +185,10 @@ class AlphaGenomeClient:
         }
 
     def predict_sequence_fitness(self, dna_sequence, context="tumor"):
+        logger.debug("predict_sequence_fitness: seq_len=%d, context=%s, cache_hit=%s",
+                     len(dna_sequence), context, dna_sequence in self._cache)
         if dna_sequence in self._cache:
+            logger.debug("predict_sequence_fitness: cache hit, returning %.4f", self._cache[dna_sequence])
             return self._cache[dna_sequence]
 
         if self._mode != "API":
@@ -190,23 +215,29 @@ class AlphaGenomeClient:
                 healthy_signal = float(np.mean(vals_h[centre - w : centre + w]))
 
                 res = tumour_signal - healthy_signal
+                logger.debug("predict_sequence_fitness (attempt %d): tumour=%.4f, healthy=%.4f, diff=%.4f",
+                             attempt, tumour_signal, healthy_signal, res)
                 self._cache[dna_sequence] = res
                 return res
 
             except Exception as e:
                 if "RESOURCE_EXHAUSTED" in str(e) or "Quota exceeded" in str(e):
                     wait = backoff * attempt
-                    logger.info(f"[Rate limit] Attempt {attempt}/{max_retries}, waiting {wait:.0f}s...")
+                    logger.warning("[Rate limit] Attempt %d/%d hit quota (%s); waiting %.0fs...",
+                                   attempt, max_retries, type(e).__name__, wait)
                     _time.sleep(wait)
                 else:
+                    logger.error("AlphaGenome API call failed (non-retryable) on attempt %d: %s: %s",
+                                 attempt, type(e).__name__, e)
                     raise
 
-        logger.warning("Rate limit retries exhausted, using local fallback.")
+        logger.warning("Rate limit retries exhausted after %d attempts; using local fallback.", max_retries)
         res = self._local_fitness(dna_sequence)
         self._cache[dna_sequence] = res
         return res
 
     def _local_fitness(self, dna):
+        logger.debug("_local_fitness: seq_len=%d", len(dna))
         score = 0.0
         for motif in [r"AGAACA", r"GGATCTT", r"CACGTG"]:
             score += len(re.findall(motif, dna)) * 20.0
@@ -217,4 +248,5 @@ class AlphaGenomeClient:
         gc = (dna.count("G") + dna.count("C")) / max(len(dna), 1)
         score -= abs(0.55 - gc) * 50.0
         score += random.uniform(-1, 1)
+        logger.debug("_local_fitness result: %.4f (gc=%.2f)", score, gc)
         return score

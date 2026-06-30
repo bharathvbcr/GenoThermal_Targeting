@@ -13,7 +13,7 @@ import shutil
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("GENOTHERMAL_LOG_LEVEL", "INFO").upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("AlphaFoldClient")
@@ -23,10 +23,10 @@ class AlphaFoldClient:
     Client for interacting with AlphaFold Server.
     """
 
-    def __init__(self, output_dir="alphafold_jobs", results_dir="alphafold_results"):
+    def __init__(self, output_dir="outputs/alphafold_jobs", results_dir="outputs/alphafold_results"):
         self.output_dir = output_dir
         self.results_dir = results_dir
-        self.pdb_dir = "predicted_structures"
+        self.pdb_dir = "outputs/predicted_structures"
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.results_dir, exist_ok=True)
         os.makedirs(self.pdb_dir, exist_ok=True)
@@ -41,6 +41,8 @@ class AlphaFoldClient:
     def create_docking_job(self, job_name, target_seq, peptide_seq,
                            target_copies=1, peptide_copies=1):
         sanitized_name = self._sanitize_name(job_name)
+        logger.debug("create_docking_job: raw='%s' -> sanitized='%s', target_len=%d, peptide_len=%d",
+                     job_name, sanitized_name, len(target_seq), len(peptide_seq))
         job = {
             "name": sanitized_name,
             "modelSeeds": [],
@@ -54,10 +56,13 @@ class AlphaFoldClient:
         filepath = os.path.join(self.output_dir, f"job_{sanitized_name.lower()}.json")
         with open(filepath, "w") as f:
             json.dump(job, f, indent=2)
-        logger.info(f"Job created: {filepath}. Upload to https://alphafoldserver.com/")
+        logger.info("Job created: %s (target_copies=%d, peptide_copies=%d)",
+                    filepath, target_copies, peptide_copies)
         return filepath
 
     def create_batch_jobs(self, target_seq, peptide_candidates):
+        logger.info("create_batch_jobs: %d candidates, batch_size=100, target_len=%d",
+                    len(peptide_candidates), len(target_seq))
         all_job_files = []
         batch_size = 100
         for i in range(0, len(peptide_candidates), batch_size):
@@ -88,21 +93,24 @@ class AlphaFoldClient:
         """
         Parses all models in the directory and returns the one with the highest pLDDT.
         """
+        logger.info("Parsing result directory: %s", extract_dir)
         cif_files = sorted(glob.glob(os.path.join(extract_dir, "*_model_*.cif")))
         if not cif_files:
+            logger.warning("No CIF model files found in %s", extract_dir)
             return {}
 
+        logger.info("Found %d CIF model file(s) in %s", len(cif_files), extract_dir)
         best_plddt = -1
         best_model = {}
 
         for cif in cif_files:
             model_idx = cif.split("_model_")[-1].replace(".cif", "")
             summary_file = os.path.join(extract_dir, f"{os.path.basename(cif).replace(f'_model_{model_idx}.cif', f'_summary_confidences_{model_idx}.json')}")
-            
-            # Fallback to finding any summary if naming is weird
+
             if not os.path.exists(summary_file):
                 summaries = glob.glob(os.path.join(extract_dir, f"*_summary_confidences_{model_idx}.json"))
-                if summaries: summary_file = summaries[0]
+                if summaries:
+                    summary_file = summaries[0]
 
             plddt = 0
             pae = 0
@@ -111,7 +119,10 @@ class AlphaFoldClient:
                     conf = json.load(f)
                 plddt = conf.get("ptm", conf.get("iptm", 0.0)) * 100
                 pae = conf.get("ranking_score", 0.0)
-            
+                logger.debug("Model %s: pLDDT=%.2f, PAE=%.4f", model_idx, plddt, pae)
+            else:
+                logger.warning("No summary confidence file for model %s in %s", model_idx, extract_dir)
+
             if plddt > best_plddt:
                 best_plddt = plddt
                 best_model = {
@@ -125,21 +136,26 @@ class AlphaFoldClient:
             dest = os.path.join(self.pdb_dir, os.path.basename(best_model["structure_path"]))
             shutil.copy2(best_model["structure_path"], dest)
             best_model["structure_path"] = dest
-            
+            logger.info("Best model: index=%s, pLDDT=%.2f -> copied to %s",
+                        best_model["model_index"], best_model["plddt_score"], dest)
+
             job_files = glob.glob(os.path.join(extract_dir, "*_job_request.json"))
             if job_files:
                 with open(job_files[0]) as f:
                     job_data = json.load(f)
                 if isinstance(job_data, list): job_data = job_data[0]
                 best_model["job_name"] = job_data.get("name", "unknown")
-        
+                logger.info("Job name resolved: %s", best_model["job_name"])
+
         return best_model
 
     def parse_result_zip(self, zip_path):
+        logger.info("Extracting ZIP: %s", zip_path)
         extract_dir = os.path.join(self.results_dir, os.path.splitext(os.path.basename(zip_path))[0])
         os.makedirs(extract_dir, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(extract_dir)
+        logger.info("Extracted to %s", extract_dir)
         return self._parse_result_dir(extract_dir)
 
     def parse_all_results(self):
@@ -153,7 +169,9 @@ class AlphaFoldClient:
                 if glob.glob(os.path.join(entry_path, "*_model_*.cif")):
                     logger.info(f"Parsing dir: {entry}")
                     results.append(self._parse_result_dir(entry_path))
-        return [r for r in results if r]
+        valid = [r for r in results if r]
+        logger.info("parse_all_results: %d total entries, %d valid.", len(results), len(valid))
+        return valid
 
     @staticmethod
     def classify_binding(plddt):

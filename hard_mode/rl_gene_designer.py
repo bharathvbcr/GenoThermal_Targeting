@@ -25,7 +25,7 @@ import random
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=getattr(logging, os.environ.get("GENOTHERMAL_LOG_LEVEL", "INFO").upper(), logging.INFO),
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("RL_Gene_Designer")
 
@@ -40,6 +40,7 @@ try:
     from alphagenome_utils import AlphaGenomeClient
     _AG_AVAILABLE = True
 except ImportError:
+    logger.warning("alphagenome_utils not found — SequenceJudge will use local heuristic reward.")
     _AG_AVAILABLE = False
 
 
@@ -87,14 +88,17 @@ class SequenceJudge:
     def _local_score(dna):
         """Fast local heuristic (no network)."""
         score = 0.0
-        if "TATA" in dna:
+        has_tata = "TATA" in dna
+        has_hse = "GAA" in dna and "TTC" in dna
+        if has_tata:
             score += 5.0
-        if "GAA" in dna and "TTC" in dna:
+        if has_hse:
             score += 8.0
         gc = (dna.count('G') + dna.count('C')) / max(len(dna), 1)
         if gc > 0.7:
             score -= 5.0
         score += random.uniform(-1, 1)
+        logger.debug("_local_score: TATA=%s, HSE=%s, gc=%.3f -> score=%.3f", has_tata, has_hse, gc, score)
         return score
 
 
@@ -131,6 +135,7 @@ class PromoterDesignEnv(gym.Env):
         super().reset(seed=seed)
         self.current_step = 0
         self.sequence = [-1] * self.target_length
+        logger.debug("PromoterDesignEnv.reset: seed=%s, length=%d", seed, self.target_length)
         return np.array(self.sequence, dtype=np.int32), {}
 
     def step(self, action):
@@ -158,13 +163,13 @@ class PromoterDesignEnv(gym.Env):
 # Quick self-test
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("\n--- Testing RL Environment (random agent) ---")
+    logger.info("--- Testing RL Environment (random agent) ---")
     env = PromoterDesignEnv(target_length=20)
     obs, _ = env.reset()
     done = False
     while not done:
         action = env.action_space.sample()
         obs, reward, done, _, _ = env.step(action)
-    print(f"DNA:    {env._indices_to_string(obs)}")
-    print(f"Reward: {reward:.4f}")
-    print("Test complete.")
+    logger.info("DNA:    %s", env._indices_to_string(obs))
+    logger.info("Reward: %.4f", reward)
+    logger.info("Test complete.")

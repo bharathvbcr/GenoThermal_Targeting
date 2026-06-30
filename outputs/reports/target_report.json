@@ -1,0 +1,15 @@
+{
+  "gene_id": "EGFR",
+  "predictions": {
+    "normal_score": 50.0,
+    "mutated_score": 36.04,
+    "classification": "NORMAL",
+    "confidence": 0.99,
+    "epigenetic_profile": {
+      "H3K27ac": "Low",
+      "H3K4me1": "Unknown",
+      "H3K27me3": "Unknown"
+    }
+  },
+  "data_source": "API"
+}

@@ -7,7 +7,7 @@ import logging
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("GENOTHERMAL_LOG_LEVEL", "INFO").upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("visualize_results.log"),
@@ -16,15 +16,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Visualizer")
 
-def plot_evolution_log(log_file="evolution_log.csv"):
+def plot_evolution_log(log_file="outputs/reports/evolution_log.csv"):
     if not os.path.exists(log_file):
         logger.error(f"{log_file} not found. Run 'python hard_mode/evolver.py' first.")
         return
 
-    logger.info(f"Plotting {log_file}...")
+    logger.info("Plotting %s...", log_file)
     df = pd.read_csv(log_file)
-    
-    # Setup style
+    logger.info("Loaded evolution log: %d generations, columns=%s", len(df), list(df.columns))
+
     sns.set_theme(style="whitegrid")
     fig, ax1 = plt.subplots(figsize=(12, 7))
 
@@ -65,14 +65,16 @@ def plot_evolution_log(log_file="evolution_log.csv"):
     lines2, labels2 = ax2.get_legend_handles_labels()
     
     if 'Mutation_Rate' in df.columns:
+        logger.debug("Including Mutation_Rate series in legend.")
         lines3, labels3 = ax3.get_legend_handles_labels()
         ax1.legend(lines + lines2 + lines3, labels + labels2 + labels3, loc='upper left')
     else:
+        logger.debug("Mutation_Rate column absent — skipping that legend series.")
         ax1.legend(lines + lines2, labels + labels2, loc='upper left')
 
     plt.tight_layout()
     
-    output_file = "evolution_trajectory.png"
+    output_file = "outputs/figures/evolution_trajectory.png"
     plt.savefig(output_file, dpi=300)
     logger.info(f"Plot saved to {output_file}")
     plt.close()

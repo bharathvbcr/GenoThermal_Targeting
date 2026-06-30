@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "python_version": "3.12",
+  "generated_at": "2026-06-30T21:34:20.583719Z",
+  "project_name": "Geno-Thermal_Targeting",
+  "resources": {
+    "genothermal-boltz2": {
+      "resource_type": "LiveServerless",
+      "file_path": "flash_boltz.py",
+      "local_path_prefix": "/flash_boltz",
+      "module_path": "flash_boltz",
+      "functions": [
+        {
+          "name": "fold_endpoint",
+          "module": "flash_boltz",
+          "is_async": true,
+          "is_class": false
+        }
+      ],
+      "is_load_balanced": false,
+      "is_live_resource": true,
+      "config_variable": null,
+      "makes_remote_calls": false,
+      "imageName": "runpod/flash:py3.12-latest",
+      "gpuIds": "AMPERE_80,-NVIDIA A100-SXM4-80GB",
+      "workersMin": 0,
+      "workersMax": 2,
+      "idleTimeout": 120,
+      "scalerType": "QUEUE_DELAY",
+      "scalerValue": 4,
+      "locations": "US-CA-2,US-IL-1,US-KS-2,US-MO-1,US-MO-2,US-NC-2,US-NE-1,US-WA-1,EU-CZ-1,EU-RO-1,EUR-NO-1",
+      "minCudaVersion": "12.8",
+      "template": {
+        "containerDiskInGb": 64,
+        "dockerArgs": "",
+        "startScript": "",
+        "advancedStart": false,
+        "containerRegistryAuthId": ""
+      },
+      "handler_file": "handler_genothermal-boltz2.py",
+      "target_python_version": "3.12",
+      "env": {
+        "_FLASH_SOURCE_FINGERPRINT": "05addf4cc143587c9173120cd500720e6ba40bcf17292d56427667594d01366e"
+      },
+      "endpoint_id": "8355gxsfqpeqgu"
+    }
+  },
+  "function_registry": {
+    "fold_endpoint": "genothermal-boltz2"
+  },
+  "source_fingerprint": "05addf4cc143587c9173120cd500720e6ba40bcf17292d56427667594d01366e",
+  "resources_endpoints": {
+    "genothermal-boltz2": "https://api.runpod.ai/v2/8355gxsfqpeqgu"
+  }
+}

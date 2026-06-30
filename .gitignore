@@ -1,43 +1,54 @@
-# Secrets
+# Flash run artifacts (regenerated each run)
+flash_metrics.json
+flash_scaling.png
+_preflight*.json
+_preflight*.png
+
+# Stray figures at the repo root or in hard_mode/ — the canonical copies live in
+# outputs/figures/ (written there by the hard_mode scripts). Older runs dropped
+# duplicates here; ignore them so they don't get re-committed.
+/*.png
+/hard_mode/*.png
+
+# Pipeline outputs (note: outputs/reports/candidate_library*.csv and
+# outputs/reports/target_report.json are already git-tracked sample outputs,
+# so they're intentionally NOT ignored here)
+*.log
+panel_selectivity*.csv
+panel_selectivity*_matrix.csv
+
+# Secrets — never commit API keys/tokens (ALPHAGENOME_API_KEY, BRIGHTDATA_API_TOKEN, ...)
 .env
+.env.*
+!.env.example
+
+# Generated intel/leaderboard outputs
+target_intel.json
+leaderboard.csv
 
 # Python
 __pycache__/
 *.pyc
+.venv/
+.venv-flash/
 *.egg-info/
-build/
-dist/
 
-# Jupyter
-.ipynb_checkpoints/
-
-# System
+# OS junk
 .DS_Store
-nul
+# Office temp/lock files
+~$*
 
-# Logs
-*.log
+# Machine-local Claude Code settings (per-machine permissions, not shared)
+.claude/settings.local.json
+
+# Training/run dumps (regenerated each run)
 ppo_gene_tensorboard/
+*.sqlite
+*.sqlite3
+*.dmp
+*.dump
 
-# Data & Outputs (Large files)
-predicted_structures/
-simulated_pdbs/
-sample_data/
-
-# IDE/Editor
-.vscode/
-.idea/
-.claude/
-.gemini/
-.gemini_security/
-.antigravity/
-
-# Agent Workflow
-RESEARCH.md
-PLAN.md
-TODO.md
-ACT.md
-TEST.md
+# Scratch/working notes (not project documentation)
+FLASH_HACKATHON_NOTES.md
 GenoThermal_Resume_Points.md
-.gitnexus
-.devcouncil/
+PATCHING_PLAN.md

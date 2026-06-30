@@ -1,0 +1,6 @@
+binding_class,complex_pde,fold_seconds,job_name,mode,plddt_score,structure_path
+STRONG_BINDER,0.3517076373100281,49.1,GE11_EGF_Mimic,peptide,86.54849529266357,outputs/predicted_structures/GE11_EGF_Mimic_model_0.cif
+STRONG_BINDER,0.3182102143764496,27.8,RGD_Integrin_binder,peptide,85.54719686508179,outputs/predicted_structures/RGD_Integrin_binder_model_0.cif
+WEAK_BINDER,0.44516146183013916,28.9,Poly_Alanine_Neg_Control,peptide,47.799938917160034,outputs/predicted_structures/Poly_Alanine_Neg_Control_model_0.cif
+STRONG_BINDER,0.3633195459842682,27.3,Novel_Peptide_A,peptide,82.87429809570312,outputs/predicted_structures/Novel_Peptide_A_model_0.cif
+STRONG_BINDER,0.33046892285346985,27.7,Novel_Peptide_B,peptide,89.74998593330383,outputs/predicted_structures/Novel_Peptide_B_model_0.cif

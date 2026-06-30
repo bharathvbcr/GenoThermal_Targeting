@@ -6,7 +6,7 @@ from alphafold_utils import AlphaFoldClient
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("GENOTHERMAL_LOG_LEVEL", "INFO").upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("ligand_designer.log"),
@@ -22,10 +22,10 @@ def main():
     parser.add_argument("--target_seq", type=str,
                         help="Amino acid sequence of the target receptor.")
     parser.add_argument("--candidates_file", type=str,
-                        default="sample_data/candidates.csv",
+                        default="data/sample_data/candidates.csv",
                         help="CSV with 'name' and 'seq' columns.")
     parser.add_argument("--output_csv", type=str,
-                        default="candidate_library.csv",
+                        default="outputs/reports/candidate_library.csv",
                         help="Path to save results CSV.")
     args = parser.parse_args()
 
@@ -70,7 +70,7 @@ def main():
     if results:
         results_df = pd.DataFrame(results)
         results_df.to_csv(args.output_csv, index=False)
-        logger.info(f"Parsed results saved to: {args.output_csv}")
+        logger.info("Saved %d results to: %s", len(results_df), args.output_csv)
         if "plddt_score" in results_df.columns:
             best = results_df.loc[results_df["plddt_score"].idxmax()]
             logger.info(f"Best candidate found: {best.get('job_name', 'N/A')} (pLDDT: {best['plddt_score']:.1f})")

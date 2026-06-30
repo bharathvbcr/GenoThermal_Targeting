@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "geno-thermal-targeting": {
+      "command": "/Users/bharath/Code/Geno-Thermal_Targeting/.venv-flash/bin/python",
+      "args": [
+        "/Users/bharath/Code/Geno-Thermal_Targeting/mcp_geno_thermal.py"
+      ],
+      "env": {
+        "GENOTHERMAL_LOG_LEVEL": "WARNING"
+      }
+    },
+    "brightdata": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@brightdata/mcp"
+      ],
+      "env": {
+        "API_TOKEN": "${BRIGHTDATA_API_TOKEN}",
+        "PRO_MODE": "true"
+      }
+    }
+  }
+}

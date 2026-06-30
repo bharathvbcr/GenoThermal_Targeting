@@ -1,0 +1,48 @@
+{
+  "version": "1.0",
+  "python_version": "3.12",
+  "generated_at": "2026-06-30T20:34:22.019042Z",
+  "project_name": "Geno-Thermal_Targeting",
+  "resources": {
+    "genothermal-fitness": {
+      "resource_type": "CpuLiveServerless",
+      "file_path": "flash_fitness.py",
+      "local_path_prefix": "/flash_fitness",
+      "module_path": "flash_fitness",
+      "functions": [
+        {
+          "name": "score_endpoint",
+          "module": "flash_fitness",
+          "is_async": true,
+          "is_class": false
+        }
+      ],
+      "is_load_balanced": false,
+      "is_live_resource": true,
+      "config_variable": null,
+      "makes_remote_calls": false,
+      "imageName": "runpod/flash-cpu:py3.12-latest",
+      "instanceIds": [
+        "cpu5c-4-8"
+      ],
+      "workersMin": 0,
+      "workersMax": 8,
+      "idleTimeout": 15,
+      "scalerType": "QUEUE_DELAY",
+      "scalerValue": 4,
+      "template": {
+        "containerDiskInGb": 60,
+        "dockerArgs": "",
+        "startScript": "",
+        "advancedStart": false,
+        "containerRegistryAuthId": ""
+      },
+      "handler_file": "handler_genothermal-fitness.py",
+      "target_python_version": "3.12"
+    }
+  },
+  "function_registry": {
+    "score_endpoint": "genothermal-fitness"
+  },
+  "source_fingerprint": "cd68820051b57c01a70f5e8985ce819b935ad4fe0d0109972d9a3064648c3fa1"
+}

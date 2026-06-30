@@ -52,3 +52,19 @@ python hard_mode/physics_verify.py
 `physics_verify.py` requires OpenMM and expects
 `simulated_pdbs/unknown_complex.pdb` by default. PDBFixer is optional but
 recommended for repairing AlphaFold-style structures before simulation.
+
+## RunPod Flash Workers
+
+`../flash_gpu_jobs.py` is a self-contained RunPod Flash port of `ppo_agent.py`
+(with an N-seed sweep) and `physics_verify.py`. It inlines the worker logic so
+the Flash job ships no sibling imports — these local scripts remain the
+source of truth; keep `flash_gpu_jobs.py` in sync if their logic changes. See
+`../FLASH_HACKATHON_NOTES.md` and `../METHODS.md`.
+
+## Claude Science MCP Access
+
+`thermo_fold.py`'s `ThermoSwitchOptimizer` is also reachable through Claude as
+the `design_thermal_switch` MCP tool (`../mcp_geno_thermal.py`, registered in
+`../.mcp.json`), which returns the best sequence plus the `switch_delta`
+(pLDDT@37C − pLDDT@43C) used to judge gating sharpness. See
+`../.claude/skills/geno-thermal-targeting/SKILL.md` for the full design loop.

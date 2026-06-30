@@ -2,38 +2,40 @@
 import os
 import json
 import sys
+import logging
 from alphagenome_utils import AlphaGenomeClient
 
-# Mock environmental setup
-# Explicitly UNSET the key to test fallback first, or SET it if we want to test API path (but we can't if we don't have a key)
-if "ALPHAGENOME_API_KEY" in os.environ:
-    print(f"API Key found: {os.environ['ALPHAGENOME_API_KEY'][:5]}...")
-else:
-    print("No API Key in env.")
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("GENOTHERMAL_LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("repro_slow.log"), logging.StreamHandler()],
+)
+logger = logging.getLogger("ReproSlow")
 
-# --- Configuration ---
-# Point to the actual file
+if "ALPHAGENOME_API_KEY" in os.environ:
+    logger.info("API Key found: %s...", os.environ["ALPHAGENOME_API_KEY"][:5])
+else:
+    logger.warning("No API Key in env; will use local fallback.")
+
 PROJECT_ROOT = os.getcwd()
-FASTA_PATH = os.path.join(PROJECT_ROOT, "sample_data", "sample_gene.fasta")
+FASTA_PATH = os.path.join(PROJECT_ROOT, "data", "sample_data", "sample_gene.fasta")
 TARGET_GENE = "EGFR"
 
 NORMAL_SEQ = "ATCGGCTAACGGCTAACTTAGCCTAGCGTTAACCGGTTATATCGGCTAA"
 
-# --- Initialize AlphaGenome Client ---
-print("Initializing client...")
+logger.info("Initializing AlphaGenomeClient...")
 ag_client = AlphaGenomeClient()
+logger.info("Client mode: %s", ag_client._mode)
 
-print(f"Client mode: {ag_client._mode}")
-
-print("Parsing fasta...")
+logger.info("Parsing FASTA from %s", FASTA_PATH)
 mutated_seq = ag_client.parse_fasta(FASTA_PATH)
-print(f"Mutated seq length: {len(mutated_seq)}")
+logger.info("Mutated seq length: %d", len(mutated_seq))
 
-print("Getting expression score...")
+logger.info("Getting expression score for %s...", TARGET_GENE)
 phase1_result = ag_client.get_expression_score(
     gene_id=TARGET_GENE,
     normal_seq=NORMAL_SEQ,
     mutated_seq=mutated_seq,
 )
 
-print(json.dumps(phase1_result, indent=2))
+logger.info("Result:\n%s", json.dumps(phase1_result, indent=2))

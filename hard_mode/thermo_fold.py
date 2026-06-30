@@ -1,5 +1,6 @@
 # evolutionary_design/thermo_fold.py
 
+import os
 import random
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,7 +9,7 @@ import logging
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("GENOTHERMAL_LOG_LEVEL", "INFO").upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("thermo_fold.log"),
@@ -34,6 +35,7 @@ class ProteinPhysicsOracle:
     Uses a simplified Two-State Model: Native <-> Unfolded.
     """
     def __init__(self):
+        logger.info("ProteinPhysicsOracle init: two-state model, R=%.6f kcal/(mol·K)", R)
         self.enthalpy_map = {
             'L': -3.5, 'I': -3.4, 'V': -2.8, 'M': -2.9,
             'A': -1.5, 'F': -3.0, 'Y': -2.5, 'W': -2.8,
@@ -47,6 +49,7 @@ class ProteinPhysicsOracle:
 
     def _calculate_thermodynamics(self, sequence):
         delta_H = self.base_delta_H
+        logger.debug("_calculate_thermodynamics: base_dH=%.3f, seq_len=%d", delta_H, len(sequence))
         for i in self.core_indices:
             aa = sequence[i]
             delta_H += self.enthalpy_map.get(aa, 0.5) * 2.0
@@ -54,13 +57,18 @@ class ProteinPhysicsOracle:
             aa = sequence[i]
             delta_H += self.enthalpy_map.get(aa, 0.5) * 1.0
         delta_S = self.base_delta_S
+        logger.debug("_calculate_thermodynamics: dH=%.3f, dS=%.5f", delta_H, delta_S)
         return delta_H, delta_S
 
     def predict_melting_temp(self, sequence):
         dH, dS = self._calculate_thermodynamics(sequence)
-        if dS == 0: return 0
+        if dS == 0:
+            logger.debug("predict_melting_temp: dS=0, returning Tm=0")
+            return 0
         tm_kelvin = dH / dS
-        return tm_kelvin - 273.15
+        tm_c = tm_kelvin - 273.15
+        logger.debug("predict_melting_temp: dH=%.3f, dS=%.5f, Tm=%.2f°C", dH, dS, tm_c)
+        return tm_c
 
     def predict_folded_fraction(self, sequence, temperature_c):
         temp_k = temperature_c + 273.15
@@ -71,16 +79,21 @@ class ProteinPhysicsOracle:
             fraction = k_fold / (1.0 + k_fold)
         except OverflowError:
             fraction = 1.0 if delta_G < 0 else 0.0
+            logger.debug("predict_folded_fraction: OverflowError at T=%.2f°C, delta_G=%.4f -> fraction=%.1f",
+                         temperature_c, delta_G, fraction)
         return fraction
 
     def predict_plddt(self, sequence, temperature_c):
         fraction = self.predict_folded_fraction(sequence, temperature_c)
         noise = np.random.normal(0, 1.5)
-        plddt = 20.0 + (78.0 * fraction)
-        return min(100.0, max(0.0, plddt + noise))
+        plddt = min(100.0, max(0.0, 20.0 + (78.0 * fraction) + noise))
+        logger.debug("predict_plddt: T=%.1f°C, fraction=%.3f, plddt=%.1f", temperature_c, fraction, plddt)
+        return plddt
 
 class ThermoSwitchOptimizer:
     def __init__(self, scaffold):
+        logger.info("ThermoSwitchOptimizer init: scaffold='%s...', pop=%d, gens=%d",
+                    scaffold[:10], 50, 30)
         self.scaffold = scaffold
         self.oracle = ProteinPhysicsOracle()
         self.population_size = 50
@@ -89,10 +102,12 @@ class ThermoSwitchOptimizer:
 
     def mutate(self, sequence):
         seq_list = list(sequence)
-        target_indices = [4, 11, 18, 25, 7, 14, 21] 
+        target_indices = [4, 11, 18, 25, 7, 14, 21]
         idx = random.choice(target_indices)
+        old_aa = seq_list[idx]
         choices = ['L', 'V', 'I', 'A', 'M', 'F']
         seq_list[idx] = random.choice(choices)
+        logger.debug("mutate: pos=%d, %s -> %s", idx, old_aa, seq_list[idx])
         return "".join(seq_list)
 
     def fitness(self, sequence):
@@ -101,8 +116,13 @@ class ThermoSwitchOptimizer:
         plddt_37 = self.oracle.predict_plddt(sequence, TARGET_TEMP_LOW)
         plddt_43 = self.oracle.predict_plddt(sequence, TARGET_TEMP_HIGH)
         switch_score = (plddt_37 - plddt_43)
-        if plddt_37 < 75.0: switch_score -= 50.0
-        return switch_score - tm_penalty, tm
+        if plddt_37 < 75.0:
+            logger.debug("fitness: pLDDT@37C=%.1f < 75 threshold, applying -50 penalty", plddt_37)
+            switch_score -= 50.0
+        final_score = switch_score - tm_penalty
+        logger.debug("fitness: Tm=%.2f, plddt37=%.1f, plddt43=%.1f, switch=%.2f, final=%.2f",
+                     tm, plddt_37, plddt_43, switch_score, final_score)
+        return final_score, tm
 
     def run(self):
         logger.info(f"--- Starting Protein Thermo-Switch Design ---")
@@ -116,11 +136,15 @@ class ThermoSwitchOptimizer:
                 scored_pop.append((score, seq, tm))
             scored_pop.sort(key=lambda x: x[0], reverse=True)
             current_best = scored_pop[0]
-            if current_best[0] > best_score:
+            improved = current_best[0] > best_score
+            if improved:
                 best_score = current_best[0]
                 best_overall = current_best
+            logger.debug("Gen %02d: best_score=%.2f, Tm=%.1f\u00b0C, improved=%s",
+                         gen, current_best[0], current_best[2], improved)
             if gen % 5 == 0:
-                logger.info(f"Gen {gen}: Best Score={current_best[0]:.2f} | Tm={current_best[2]:.1f}\u00b0C")
+                logger.info("Gen %02d: Best Score=%.2f | Tm=%.1f\u00b0C",
+                            gen, current_best[0], current_best[2])
             survivors = [x[1] for x in scored_pop[:int(self.population_size * 0.2)]]
             new_pop = survivors[:]
             while len(new_pop) < self.population_size:
@@ -146,8 +170,9 @@ class ThermoSwitchOptimizer:
         plt.ylabel("Protein Stability (pLDDT / % Folded)")
         plt.legend()
         plt.grid(True, alpha=0.3)
-        plt.savefig("thermo_profile.png")
-        logger.info(f"Melting curve saved to 'thermo_profile.png'")
+        os.makedirs("outputs/figures", exist_ok=True)
+        plt.savefig("outputs/figures/thermo_profile.png")
+        logger.info(f"Melting curve saved to 'outputs/figures/thermo_profile.png'")
 
 if __name__ == "__main__":
     designer = ThermoSwitchOptimizer(BASE_SCAFFOLD)

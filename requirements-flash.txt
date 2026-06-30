@@ -1,0 +1,22 @@
+# RunPod Flash hackathon deps. Install on the laptop driving the pipeline:
+#   pip install -r requirements-flash.txt
+# Worker-side deps (boltz, torch, openmm, stable-baselines3, ...) are declared per-endpoint
+# in the flash_*.py @Endpoint(dependencies=[...]) blocks and installed by Flash on the worker.
+
+# --- Flash SDK (the only hard requirement to fan out) ---
+runpod-flash
+
+# --- Driver-side (orchestration, metrics, dashboard, CSV handling) ---
+pandas
+numpy
+matplotlib
+seaborn  # hard_mode/bio_circuit.py (plot_circuit) + visualize_results.py
+
+# --- Local-fallback / --local runs only (skip if you only ever run --flash) ---
+# boltz                 # Boltz-2 folding+affinity (needs a local GPU)
+# torch
+# stable-baselines3     # PPO promoter design
+# gymnasium
+# openmm                # physics verification (conda install -c conda-forge openmm is more reliable)
+# pdbfixer
+# alphagenome           # only if scoring the GA fitness in API mode (default is mode='Local', no dep)
