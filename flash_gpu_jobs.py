@@ -165,9 +165,12 @@ def _train_and_generate(timesteps=10000, length=200, seed=None):
     logger.info("_train_and_generate: timesteps=%d, length=%d, seed=%s", timesteps, length, seed)
     from stable_baselines3 import PPO
     from stable_baselines3.common.vec_env import DummyVecEnv
+    from stable_baselines3.common.monitor import Monitor
 
     Env = _make_env_class()
-    env = DummyVecEnv([lambda: Env(length)])
+    # Wrap in Monitor so SB3 populates ep_info_buffer — without it ep_rew_mean is always nan
+    # (both in the live [ppo] telemetry and in the reward_history we plot).
+    env = DummyVecEnv([lambda: Monitor(Env(length))])
     n_steps = min(2048, timesteps)
     logger.info("Building PPO model (n_steps=%d, batch_size=%d)", n_steps, min(64, n_steps))
     model = PPO("MlpPolicy", env, verbose=0, learning_rate=3e-4,
@@ -265,7 +268,10 @@ def _verify_physics(pdb_text):
         fx.replaceNonstandardResidues()
         fx.findMissingAtoms()
         fx.addMissingAtoms()
-        fx.addMissingHydrogens(7.0)
+        # NOTE: deliberately do NOT addMissingHydrogens here. pdbfixer's H naming for terminal
+        # residues conflicts with amber14's terminal templates (residue 0 ALA gets read as NSER).
+        # Let OpenMM's Modeller.addHydrogens(ff) add them in setup() — it knows the FF's terminal
+        # variants and builds a template-consistent topology.
         out = p.replace(".pdb", "_fixed.pdb")
         with open(out, "w") as fh:
             app.PDBFile.writeFile(fx.topology, fx.positions, fh)
@@ -281,9 +287,10 @@ def _verify_physics(pdb_text):
         logger.debug("setup: creating ForceField (%s, %s)...", FF, WATER)
         ff = app.ForceField(FF, WATER)
         mod = app.Modeller(pdb.topology, pdb.positions)
-        if not have_fixer:
-            logger.debug("setup: addHydrogens (no pdbfixer)...")
-            mod.addHydrogens(ff)
+        # Always let the forcefield add hydrogens (template-consistent terminals); pdbfixer only
+        # repairs missing heavy atoms above.
+        logger.debug("setup: addHydrogens via forcefield...")
+        mod.addHydrogens(ff)
         logger.debug("setup: addSolvent (padding=1.0 nm)...")
         mod.addSolvent(ff, padding=1.0 * unit.nanometers)
         logger.debug("setup: createSystem (PME, HBonds)...")
@@ -454,6 +461,52 @@ def _module_missing(mod: str) -> bool:
     return importlib.util.find_spec(mod) is None
 
 
+# The toy idealised stub PDBs (atoms on an integer grid) have non-physical geometry that the
+# amber forcefield can't template. Real Boltz-2 folds do. So for MD we prefer a real fold.
+_STUB_PDB_DEFAULT = os.path.join("outputs", "simulated_pdbs", "unknown_complex.pdb")
+
+
+def _resolve_md_pdb_text(requested_path: str):
+    """Return PDB text for the MD phase, preferring a real folded structure.
+
+    - If the caller passed a real, non-stub .pdb, use it verbatim.
+    - Otherwise pick a real Boltz-2 fold from outputs/predicted_structures (skipping the
+      poly-alanine negative control) and convert CIF->PDB via OpenMM.
+    - Falls back to the requested file's raw text if no fold / no OpenMM is available.
+    """
+    import glob
+
+    def _read(p):
+        with open(p) as fh:
+            return fh.read()
+
+    explicit = requested_path and os.path.exists(requested_path) and \
+        os.path.abspath(requested_path) != os.path.abspath(_STUB_PDB_DEFAULT)
+    if explicit and requested_path.endswith(".pdb"):
+        logger.info("MD: using caller-provided structure %s", requested_path)
+        return _read(requested_path)
+
+    folds = sorted(glob.glob(os.path.join("outputs", "predicted_structures", "*model_0.cif")))
+    folds = [f for f in folds if "poly_alanine" not in f.lower() and "neg_control" not in f.lower()] or folds
+    if folds and not _module_missing("openmm"):
+        cif = folds[0]
+        try:
+            from openmm import app
+            import io
+            obj = app.PDBxFile(cif)
+            buf = io.StringIO()
+            app.PDBFile.writeFile(obj.topology, obj.positions, buf)
+            logger.info("MD: using real Boltz-2 fold %s (converted CIF->PDB)", os.path.basename(cif))
+            return buf.getvalue()
+        except Exception as e:
+            logger.warning("MD: CIF->PDB conversion failed (%s); falling back to requested path.", e)
+
+    if requested_path and os.path.exists(requested_path):
+        logger.info("MD: falling back to %s", requested_path)
+        return _read(requested_path)
+    return None
+
+
 # --- Figures (so Phases 8 & 9 are no longer chart-less in the rollup) ------
 FIGURES_DIR = os.path.join("outputs", "figures")
 REPORTS_DIR = os.path.join("outputs", "reports")
@@ -556,47 +609,71 @@ if __name__ == "__main__":
     logger.info("%s phase '%s'%s", "FLASH" if use_flash else "LOCAL",
                 args.phase, " (smoke)" if smoke else "")
 
+    def _ppo_local(timesteps):
+        """Local PPO run, or a clean skip if sb3 isn't installed here."""
+        if _module_missing("stable_baselines3"):
+            return _skip("stable_baselines3 is not installed locally")
+        logger.info("PPO: Local training (no Flash).")
+        return _train_and_generate(timesteps)
+
+    def _md_local():
+        """Local MD run, or a clean skip if openmm / a usable structure is missing."""
+        if _module_missing("openmm"):
+            return _skip("openmm is not installed locally")
+        pdb_text = _resolve_md_pdb_text(args.pdb)
+        if not pdb_text:
+            return _skip(f"no usable MD structure (requested {args.pdb})")
+        return _verify_physics(pdb_text)
+
     if args.phase == "ppo":
         timesteps = 200 if smoke else 10000
         logger.info("PPO: timesteps=%d, sweep=%d, use_flash=%s", timesteps, args.sweep, use_flash)
         if use_flash and args.sweep > 1:
             logger.info("PPO: Fan-out sweep of %d seeds on Flash.", args.sweep)
-            out = _ppo_sweep(args.sweep, timesteps, 200)
+            try:
+                out = _ppo_sweep(args.sweep, timesteps, 200)
+            except Exception as e:
+                logger.warning("PPO Flash sweep failed (%s) — falling back to local.", e)
+                out = _ppo_local(timesteps)
         elif use_flash:
             logger.info("PPO: Single Flash GPU job.")
-            metrics_single = None
             from flash_metrics import FanoutMetrics
             metrics_single = FanoutMetrics(phase="ppo-gpu", resource="RTX_4090")
             rec = metrics_single.start()
-            out = _run_remote(train_ppo_endpoint, {"timesteps": timesteps})
-            metrics_single.done(rec, ok=True)
-            metrics_single.save()
-        elif _module_missing("stable_baselines3"):
-            out = _skip("stable_baselines3 is not installed locally")
+            try:
+                out = _run_remote(train_ppo_endpoint, {"timesteps": timesteps})
+                metrics_single.done(rec, ok=True)
+                metrics_single.save()
+            except Exception as e:
+                # The genothermal-ppo endpoint may not be deployed (`flash deploy`). Rather than
+                # crash the phase, record the miss and fall back to local training/skip.
+                metrics_single.done(rec, ok=False)
+                metrics_single.save()
+                logger.warning("PPO Flash dispatch failed (%s) — falling back to local.", e)
+                out = _ppo_local(timesteps)
         else:
-            logger.info("PPO: Local training (no Flash).")
-            out = _train_and_generate(timesteps)
+            out = _ppo_local(timesteps)
     else:  # md
         if use_flash:
-            logger.info("MD: reading PDB from %s", args.pdb)
-            pdb_text = open(args.pdb).read()
-            logger.info("MD: PDB loaded (%d chars).", len(pdb_text))
-            logger.info("MD: Running on Flash GPU worker.")
+            logger.info("MD: dispatching to Flash GPU worker.")
             from flash_metrics import FanoutMetrics
             m = FanoutMetrics(phase="md-gpu", resource="RTX_4090")
             rec = m.start()
-            out = _run_remote(verify_physics_endpoint, {"pdb_text": pdb_text})
-            m.done(rec, ok=True)
-            m.save()
-        elif _module_missing("openmm"):
-            out = _skip("openmm is not installed locally")
-        elif not os.path.exists(args.pdb):
-            out = _skip(f"input PDB not found: {args.pdb}")
+            try:
+                pdb_text = _resolve_md_pdb_text(args.pdb)
+                if not pdb_text:
+                    raise FileNotFoundError(f"no usable MD structure (requested {args.pdb})")
+                out = _run_remote(verify_physics_endpoint, {"pdb_text": pdb_text})
+                m.done(rec, ok=True)
+                m.save()
+            except Exception as e:
+                # genothermal-md endpoint may not be deployed; fall back to local OpenMM/skip.
+                m.done(rec, ok=False)
+                m.save()
+                logger.warning("MD Flash dispatch failed (%s) — falling back to local.", e)
+                out = _md_local()
         else:
-            logger.info("MD: reading PDB from %s", args.pdb)
-            pdb_text = open(args.pdb).read()
-            logger.info("MD: PDB loaded (%d chars). Running locally (no Flash).", len(pdb_text))
-            out = _verify_physics(pdb_text)
+            out = _md_local()
 
     # Render the phase's figure so Phases 8 & 9 are represented in the unified report.
     try:

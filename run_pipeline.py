@@ -65,13 +65,17 @@ def main():
     parser.add_argument("--flash", action="store_true",
                         help="Fan compute out on RunPod Flash (same as GENOTHERMAL_FLASH=1).")
     parser.add_argument("--demo", action="store_true",
-                        help="One-shot judge demo: implies --smoke --flash --keep-going and renders the dashboard.")
+                        help="One-shot judge demo: implies --smoke --flash --keep-going --monitor and renders the dashboard.")
     parser.add_argument("--keep-going", action="store_true",
                         help="Warn and continue past a failed phase instead of aborting (protects a live demo).")
+    parser.add_argument("--monitor", action="store_true",
+                        help="Pop open a live browser dashboard showing each phase + the Flash fan-out in real time.")
+    parser.add_argument("--monitor-port", type=int, default=8765,
+                        help="Port for the live monitor (default 8765; falls back to a free port if taken).")
     args = parser.parse_args()
 
     if args.demo:
-        args.smoke = args.flash = args.keep_going = True
+        args.smoke = args.flash = args.keep_going = args.monitor = True
 
     # Propagate to child phases via the environment (subprocesses inherit os.environ).
     if args.flash:
@@ -98,14 +102,38 @@ def main():
 
     failures = []
 
+    # Optional live progress "pop-up": a self-contained browser dashboard that shows every
+    # phase light up running -> success/failed/skipped in real time, plus the Flash fan-out
+    # metrics. Runs in a daemon thread; if it can't start it must never break the pipeline.
+    monitor = None
+    if args.monitor:
+        try:
+            from pipeline_monitor import PipelineMonitor
+            monitor = PipelineMonitor(
+                port=args.monitor_port,
+                mode={"flash": flash_mode, "smoke": smoke_mode},
+            )
+            monitor.start()
+        except Exception as e:
+            logger.debug("Could not start live monitor: %s", e)
+            monitor = None
+
     def step(command, description, optional=False):
         """Run a phase. On failure: warn-and-continue if keep_going/optional, else abort."""
-        if run_step(command, description):
+        if monitor:
+            monitor.start_phase(description)
+        start = time.time()
+        ok = run_step(command, description)
+        if monitor:
+            monitor.end_phase(description, ok, elapsed=time.time() - start, optional=optional)
+        if ok:
             return True
         failures.append(description)
         if keep_going or optional:
             logger.warning("Continuing past failed phase: %s", description)
             return False
+        if monitor:
+            monitor.finish(failures)
         sys.exit(1)
 
     # 1. Genomic Discovery
@@ -141,6 +169,8 @@ def main():
         step("python flash_gpu_jobs.py md", "Phase 9: Physics Verification (OpenMM)", optional=True)
     else:
         logger.info("SKIPPING Phase 9: Physics Verification ('openmm' not found; set GENOTHERMAL_FLASH=1 to run on Flash)")
+        if monitor:
+            monitor.skip_phase("Phase 9: Physics Verification (OpenMM)", reason="openmm not installed")
 
     # 9. Visualization
     step("python visualize_results.py", "Phase 10: Visualization", optional=True)
@@ -148,9 +178,14 @@ def main():
     # 10. Flash observability/cost dashboard (only if a Flash run recorded metrics)
     if os.path.exists("flash_metrics.json"):
         step("python flash_dashboard.py", "Phase 11: Flash Fan-out Dashboard", optional=True)
+    elif monitor:
+        monitor.skip_phase("Phase 11: Flash Fan-out Dashboard", reason="no flash_metrics.json")
 
     # 11. Terminal summary report
     step("python summary_report.py", "Phase 12: Summary Report", optional=True)
+
+    if monitor:
+        monitor.finish(failures)
 
     logger.info("=" * 60)
     if failures:
@@ -175,6 +210,11 @@ def main():
                 logger.info("Opened the unified report in your browser (--demo).")
             except Exception as e:
                 logger.debug("Could not auto-open report: %s", e)
+
+    # Keep the live monitor page up after the run so the final flow + artifacts can be
+    # studied. Blocks for Enter in an interactive terminal; returns at once otherwise.
+    if monitor:
+        monitor.linger()
 
 if __name__ == "__main__":
     main()

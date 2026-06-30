@@ -12,11 +12,16 @@ numpy
 matplotlib
 seaborn  # hard_mode/bio_circuit.py (plot_circuit) + visualize_results.py
 
-# --- Local-fallback / --local runs only (skip if you only ever run --flash) ---
-# boltz                 # Boltz-2 folding+affinity (needs a local GPU)
+# --- Local-fallback deps ---
+# Phase 8 (PPO) and Phase 9 (OpenMM MD) fall back to LOCAL execution when their Flash
+# endpoints (genothermal-ppo / genothermal-md) aren't deployed. These deps make that
+# fallback actually run and render ppo_reward_curve.png / physics_rmsd.png in the report.
+stable-baselines3       # PPO promoter design (Phase 8)
+gymnasium
+openmm                  # physics verification (Phase 9); conda-forge is also fine
+pdbfixer                # repairs heavy atoms before MD
+
+# --- Optional (only for a fully-local --local run, needs a local GPU) ---
+# boltz                 # Boltz-2 folding+affinity (otherwise folds on the Flash endpoint)
 # torch
-# stable-baselines3     # PPO promoter design
-# gymnasium
-# openmm                # physics verification (conda install -c conda-forge openmm is more reliable)
-# pdbfixer
 # alphagenome           # only if scoring the GA fitness in API mode (default is mode='Local', no dep)

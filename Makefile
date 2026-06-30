@@ -2,7 +2,7 @@
 # Use the interpreter that has your deps:  make PYTHON=~/.venvs/ml/bin/python preflight
 PYTHON ?= python
 
-.PHONY: help preflight install demo demo-local pipeline panel screen sweep dashboard snapshot replay story board intel clean claude-science claude-science-flash mcp-selftest
+.PHONY: help preflight install demo demo-local monitor pipeline panel screen sweep dashboard snapshot replay story board intel clean claude-science claude-science-flash mcp-selftest
 
 # The Claude Science MCP server uses the env that has every dep (numpy/alphagenome/runpod_flash/mcp).
 SCIENCE_PYTHON ?= .venv-flash/bin/python
@@ -23,6 +23,9 @@ demo:                ## One-shot judge demo on Flash (smoke + flash + keep-going
 
 demo-local:          ## Same demo but fully local (no Flash SDK needed)
 	$(PYTHON) run_pipeline.py --smoke --keep-going
+
+monitor:             ## Live demo with the browser progress pop-up (smoke + flash + keep-going + monitor)
+	$(PYTHON) run_pipeline.py --smoke --flash --keep-going --monitor
 
 pipeline:            ## Full pipeline on Flash (real workload, not smoke)
 	$(PYTHON) run_pipeline.py --flash
