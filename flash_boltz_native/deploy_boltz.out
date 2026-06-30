@@ -1,0 +1,16 @@
+>> [1/2] stage isolated deploy dir + patch endpoint (dependencies=[], runtime boltz install)
+patched: /Users/bharath/Code/Geno-Thermal_Targeting/flash_boltz_native/.stage/flash_boltz.py
+>> [2/2] deploy (no docker; dependencies=[] builds cleanly)
+✓ built Geno-Thermal_Targeting  1 files, 0 deps, 0.2 MB
+
+✓ uploaded  0.2 MB  1.2s
+✓ deployed to production  2.1s
+
+  genothermal-boltz2  https://api.runpod.ai/v2/uf8p5jd5gmakrp/runsync
+
+curl -X POST https://api.runpod.ai/v2/uf8p5jd5gmakrp/runsync \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -d '{"input": {}}'
+>> done. First fold cold-starts (installs boltz + downloads weights, a few min); then warm.
+>> Fold for real:  cd /Users/bharath/Code/Geno-Thermal_Targeting && GENOTHERMAL_FLASH=1 .venv-flash/bin/python boltz_designer.py --output_csv outputs/reports/candidate_library_flash.csv

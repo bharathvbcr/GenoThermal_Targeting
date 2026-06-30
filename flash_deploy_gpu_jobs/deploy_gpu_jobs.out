@@ -1,0 +1,13 @@
+✓ installed 6 packages  17.0s
+✓ built Geno-Thermal_Targeting  2 files, 6 deps, 39.4 MB
+
+✓ uploaded  39.4 MB  5.0s
+✓ deployed to production  4.1s
+
+  genothermal-md   https://api.runpod.ai/v2/hyx9tjpfru6tfr/runsync
+  genothermal-ppo  https://api.runpod.ai/v2/2wqb40qpap1zvc/runsync
+
+curl -X POST https://api.runpod.ai/v2/hyx9tjpfru6tfr/runsync \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -d '{"input": {}}'

@@ -1,0 +1,97 @@
+{
+  "version": "1.0",
+  "python_version": "3.12",
+  "generated_at": "2026-06-30T22:50:42.200262Z",
+  "project_name": "Geno-Thermal_Targeting",
+  "resources": {
+    "genothermal-md": {
+      "resource_type": "LiveServerless",
+      "file_path": "flash_gpu_jobs.py",
+      "local_path_prefix": "/flash_gpu_jobs",
+      "module_path": "flash_gpu_jobs",
+      "functions": [
+        {
+          "name": "verify_physics_endpoint",
+          "module": "flash_gpu_jobs",
+          "is_async": true,
+          "is_class": false
+        }
+      ],
+      "is_load_balanced": false,
+      "is_live_resource": true,
+      "config_variable": null,
+      "makes_remote_calls": false,
+      "imageName": "runpod/flash:py3.12-latest",
+      "gpuIds": "ADA_24",
+      "workersMin": 0,
+      "workersMax": 1,
+      "idleTimeout": 20,
+      "scalerType": "QUEUE_DELAY",
+      "scalerValue": 4,
+      "locations": "US-CA-2,US-IL-1,US-KS-2,US-MO-1,US-MO-2,US-NC-2,US-NE-1,US-WA-1,EU-CZ-1,EU-RO-1,EUR-NO-1",
+      "minCudaVersion": "12.8",
+      "template": {
+        "containerDiskInGb": 64,
+        "dockerArgs": "",
+        "startScript": "",
+        "advancedStart": false,
+        "containerRegistryAuthId": ""
+      },
+      "handler_file": "handler_genothermal-md.py",
+      "target_python_version": "3.12",
+      "env": {
+        "_FLASH_SOURCE_FINGERPRINT": "7993f857c49fe84b535c518601d328317e66cdab785c58d283f3abb1fcaeba33"
+      },
+      "endpoint_id": "hyx9tjpfru6tfr"
+    },
+    "genothermal-ppo": {
+      "resource_type": "LiveServerless",
+      "file_path": "flash_gpu_jobs.py",
+      "local_path_prefix": "/flash_gpu_jobs",
+      "module_path": "flash_gpu_jobs",
+      "functions": [
+        {
+          "name": "train_ppo_endpoint",
+          "module": "flash_gpu_jobs",
+          "is_async": true,
+          "is_class": false
+        }
+      ],
+      "is_load_balanced": false,
+      "is_live_resource": true,
+      "config_variable": null,
+      "makes_remote_calls": false,
+      "imageName": "runpod/flash:py3.12-latest",
+      "gpuIds": "ADA_24",
+      "workersMin": 0,
+      "workersMax": 8,
+      "idleTimeout": 30,
+      "scalerType": "QUEUE_DELAY",
+      "scalerValue": 4,
+      "locations": "US-CA-2,US-IL-1,US-KS-2,US-MO-1,US-MO-2,US-NC-2,US-NE-1,US-WA-1,EU-CZ-1,EU-RO-1,EUR-NO-1",
+      "minCudaVersion": "12.8",
+      "template": {
+        "containerDiskInGb": 64,
+        "dockerArgs": "",
+        "startScript": "",
+        "advancedStart": false,
+        "containerRegistryAuthId": ""
+      },
+      "handler_file": "handler_genothermal-ppo.py",
+      "target_python_version": "3.12",
+      "env": {
+        "_FLASH_SOURCE_FINGERPRINT": "7993f857c49fe84b535c518601d328317e66cdab785c58d283f3abb1fcaeba33"
+      },
+      "endpoint_id": "2wqb40qpap1zvc"
+    }
+  },
+  "function_registry": {
+    "verify_physics_endpoint": "genothermal-md",
+    "train_ppo_endpoint": "genothermal-ppo"
+  },
+  "source_fingerprint": "7993f857c49fe84b535c518601d328317e66cdab785c58d283f3abb1fcaeba33",
+  "resources_endpoints": {
+    "genothermal-md": "https://api.runpod.ai/v2/hyx9tjpfru6tfr",
+    "genothermal-ppo": "https://api.runpod.ai/v2/2wqb40qpap1zvc"
+  }
+}

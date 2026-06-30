@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "python_version": "3.12",
-  "generated_at": "2026-06-30T21:34:20.583719Z",
+  "generated_at": "2026-06-30T22:56:27.330585Z",
   "project_name": "Geno-Thermal_Targeting",
   "resources": {
     "genothermal-boltz2": {
@@ -24,7 +24,7 @@
       "imageName": "runpod/flash:py3.12-latest",
       "gpuIds": "AMPERE_80,-NVIDIA A100-SXM4-80GB",
       "workersMin": 0,
-      "workersMax": 2,
+      "workersMax": 1,
       "idleTimeout": 120,
       "scalerType": "QUEUE_DELAY",
       "scalerValue": 4,
@@ -40,16 +40,16 @@
       "handler_file": "handler_genothermal-boltz2.py",
       "target_python_version": "3.12",
       "env": {
-        "_FLASH_SOURCE_FINGERPRINT": "05addf4cc143587c9173120cd500720e6ba40bcf17292d56427667594d01366e"
+        "_FLASH_SOURCE_FINGERPRINT": "937dd2ccefc310cea72e1d841604ac5a32945ce27402a0063ecb05d68a2d917e"
       },
-      "endpoint_id": "8355gxsfqpeqgu"
+      "endpoint_id": "uf8p5jd5gmakrp"
     }
   },
   "function_registry": {
     "fold_endpoint": "genothermal-boltz2"
   },
-  "source_fingerprint": "05addf4cc143587c9173120cd500720e6ba40bcf17292d56427667594d01366e",
+  "source_fingerprint": "937dd2ccefc310cea72e1d841604ac5a32945ce27402a0063ecb05d68a2d917e",
   "resources_endpoints": {
-    "genothermal-boltz2": "https://api.runpod.ai/v2/8355gxsfqpeqgu"
+    "genothermal-boltz2": "https://api.runpod.ai/v2/uf8p5jd5gmakrp"
   }
 }

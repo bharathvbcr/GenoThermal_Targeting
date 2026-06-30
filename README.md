@@ -109,6 +109,7 @@ and continues to final visualization.
 ├── alphagenome_utils.py            # AlphaGenome API/local-heuristic adapter
 ├── alphafold_utils.py              # AlphaFold Server job and result utilities
 ├── visualize_results.py            # Evolution-log plotting
+├── pipeline_monitor.py             # Zero-dep live progress "pop-up" + static HTML run report
 ├── visualize_structure.py          # py3Dmol interactive 3D structure/docking viewer
 ├── geno_thermal_master.py          # Headless .py port of Geno_Thermal_Master.ipynb (Phases 1-9 + summary)
 ├── summary_report.py               # Lightweight terminal report reader
@@ -127,6 +128,7 @@ and continues to final visualization.
 ├── boltz_designer.py               # Flash: Phase 2 driver (replaces ligand_designer.py)
 ├── flash_fitness.py                # Flash: self-contained GA fitness fan-out
 ├── flash_gpu_jobs.py                # Flash: self-contained PPO + OpenMM workers
+├── flash_deploy_gpu_jobs/           # Flash app context (.flash/) for deploying flash_gpu_jobs.py
 ├── target_panel.py                 # Flash: multi-oncogene selectivity panel
 ├── fetch_targets.py                # Builds data/sample_data/targets.csv from UniProt
 ├── leaderboard.py                  # Unified peptide + small-molecule leaderboard
@@ -270,7 +272,8 @@ demo runbook.
 | `target_panel.py` | — (new) | Folds every candidate against every target in a multi-oncogene panel (EGFR/KRAS/HER2/BRAF) and ranks by `selectivity_margin`. |
 | `fetch_targets.py` | — (new) | Builds `data/sample_data/targets.csv` from exact UniProt sequences, domain-trimmed for like-for-like comparison. |
 | `leaderboard.py` | — (new) | Unifies peptide and small-molecule hits from the candidate library into one ranked board. |
-| `bright_data_intel.py` | — (new) | Live target intelligence via the Bright Data SERP API, fanned out on Flash; degrades to a local stub without a token. |
+| `bright_data_intel.py` | — (new) | Live target intelligence via the Bright Data SERP API, fanned out on Flash. When a Flash intel worker fails or cold-starts, it retries through a live **local** Bright Data SERP call so the data stays real instead of downgrading; only falls back to a clearly flagged `local-stub` as a last resort (or when no token is set). |
+| `pipeline_monitor.py` | — (new) | Zero-dependency live progress "pop-up": a self-contained HTML page (stdlib `http.server` only) that lights each phase up running -> success/failed/skipped in real time with per-phase sub-progress bars and the streamed Flash 0->N->0 metrics. On finish it also emits a shareable static report (`outputs/reports/pipeline_report.html`, images base64-inlined, renders with no server). Auto-enabled by `--demo`; opt in elsewhere with `--monitor`. |
 | `flash_metrics.py` / `flash_dashboard.py` | — (new) | `FanoutMetrics` observability/cost accounting (`flash_metrics.json`) and the rendered concurrency/cost chart (`outputs/figures/flash_scaling.png`). |
 | `preflight.py` | — (new) | 12 local sanity checks that exercise every fallback path with no Flash SDK, GPU, or heavy deps. Run first. |
 | `make_demo_snapshot.py` | — (new) | Builds an illustrative `outputs/reports/demo_metrics.json` / `outputs/figures/flash_scaling.png` fallback for when a live demo call stalls. |
@@ -310,6 +313,7 @@ of it duplicates logic.
 | `design_promoter_flash` | `hard_mode/evolver.py` | Evolves a hyperthermia-gated promoter; with `use_flash=True` the GA's fitness scoring fans out on the RunPod Flash fleet (0->N->0). `mode` in the response reflects whether Flash genuinely engaged this call, not just what was requested. |
 | `screen_and_verify` | the above, chained | One-call discover -> design -> (Flash promoter GA) -> verify loop; the headline demo artifact. |
 | `autonomous_design_loop` | `design_ligands` + `verify_with_bionemo`, iterated | The one **net-new** tool (not a wrapper): a closed design loop that folds binders on the project's own Boltz-2/Flash path (search oracle), validates each on the *independent* BioNeMo verifier (acceptance oracle), then mutates the best survivors — repeating until enough binders are independently corroborated. The two oracles are different models, so the search cannot overfit its own scorer; it stops honestly (`fold_oracle_available: false`) instead of evolving mutated variants on invented fitness when no live fold runs. Returns the validated library plus a per-round reasoning trace. |
+| `kill_flash_endpoints` | `flash undeploy --all --force` | Tears down **every** RunPod Flash endpoint on the account. Destructive and account-wide — gated behind `confirm=True` (a no-op that just reports what it would do otherwise); never invoke casually. |
 
 Registration lives in `.mcp.json` under the server name `geno-thermal-targeting`,
 launched with `.venv-flash/bin/python mcp_geno_thermal.py` (the plain `venv/`

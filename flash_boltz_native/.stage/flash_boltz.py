@@ -279,7 +279,7 @@ try:
     @Endpoint(
         name="genothermal-boltz2",
         gpu=GpuType.NVIDIA_A100_80GB_PCIe,   # Boltz-2 wants ~A100-class; 80GB is comfortable
-        workers=(0, 2),                     # scale 0 -> 20, then back to zero
+        workers=(0, 1),                     # scale 0 -> 20, then back to zero
         dependencies=[],   # Docker-free: boltz installed at runtime on the worker    # boltz pins its own torch; pynvml enables SM-util sampling
         idle_timeout=120,                    # reuse warm boxes across a candidate burst (multi-GB weight reload is slow)
     )

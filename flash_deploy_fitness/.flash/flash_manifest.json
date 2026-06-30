@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "python_version": "3.12",
-  "generated_at": "2026-06-30T20:34:22.019042Z",
+  "generated_at": "2026-06-30T22:56:12.061849Z",
   "project_name": "Geno-Thermal_Targeting",
   "resources": {
     "genothermal-fitness": {
@@ -38,11 +38,18 @@
         "containerRegistryAuthId": ""
       },
       "handler_file": "handler_genothermal-fitness.py",
-      "target_python_version": "3.12"
+      "target_python_version": "3.12",
+      "env": {
+        "_FLASH_SOURCE_FINGERPRINT": "1c9bac125a1bb5efb1108d41bd74d7494afd65d2cf8c8a7b705bea5a3b6c5987"
+      },
+      "endpoint_id": "qq0ckp8v9o6d0l"
     }
   },
   "function_registry": {
     "score_endpoint": "genothermal-fitness"
   },
-  "source_fingerprint": "cd68820051b57c01a70f5e8985ce819b935ad4fe0d0109972d9a3064648c3fa1"
+  "source_fingerprint": "1c9bac125a1bb5efb1108d41bd74d7494afd65d2cf8c8a7b705bea5a3b6c5987",
+  "resources_endpoints": {
+    "genothermal-fitness": "https://api.runpod.ai/v2/qq0ckp8v9o6d0l"
+  }
 }

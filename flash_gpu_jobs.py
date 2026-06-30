@@ -381,7 +381,10 @@ try:
         name="genothermal-md",
         gpu=GpuType.NVIDIA_GEFORCE_RTX_4090,   # tiny single-peptide MD; 4090 is plenty (cost win)
         workers=(0, 1),
-        dependencies=["openmm", "pdbfixer", "numpy", "pynvml"],
+        # pdbfixer is NOT on PyPI (conda/git only) — a bare "pdbfixer" fails the whole
+        # build-time pip install. Pin the git URL so it installs on the worker; the code
+        # below already degrades gracefully (have_fixer=False) if it's still absent.
+        dependencies=["openmm", "pdbfixer @ git+https://github.com/openmm/pdbfixer.git", "numpy", "pynvml"],
         idle_timeout=20,
     )
     async def verify_physics_endpoint(payload: dict) -> dict:
