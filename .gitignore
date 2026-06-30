@@ -46,7 +46,14 @@ __pycache__/
 
 # Stdout capture + partial/in-progress fold artifacts (regenerated each run)
 pipeline_run.out
+pipeline_run*.out
 *.partial.csv
+
+# Presentation / demo deliverables — not part of the code submission
+# (decks + their PDF exports + the demo walkthrough are produced locally, not committed)
+*.pptx
+*.pdf
+DEMO_SCRIPT.md
 
 # Training/run dumps (regenerated each run)
 ppo_gene_tensorboard/
