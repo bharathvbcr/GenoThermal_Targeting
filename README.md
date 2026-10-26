@@ -509,3 +509,11 @@ gitnexus context AlphaGenomeClient -r Geno-Thermal_Targeting
 gitnexus impact AlphaGenomeClient -r Geno-Thermal_Targeting
 gitnexus cypher -r Geno-Thermal_Targeting "MATCH (n) WHERE toLower(n.name) CONTAINS 'pipeline' OR toLower(n.filePath) CONTAINS 'pipeline' RETURN n.name, n.filePath LIMIT 25"
 ```
+
+## License & Acknowledgements
+
+Released under the [MIT License](LICENSE).
+
+- **Google DeepMind ([AlphaGenome](https://deepmind.google/) & [AlphaFold](https://github.com/google-deepmind/alphafold))** — Regulatory variant effect scoring and 3D biomolecular structure prediction foundations integrated by `AlphaGenomeClient` and `AlphaFoldClient`.
+- **Meta FAIR ([ESM-2](https://github.com/facebookresearch/esm))** — Protein language model embeddings used for zero-shot missense mutational scanning.
+- **OpenMM**, **Ensembl REST API**, **GTEx Portal**, and **TCGA** — Molecular dynamics simulation engine and genomic reference datasets.
